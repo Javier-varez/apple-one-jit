@@ -137,35 +137,42 @@ mod branch {
 
 pub use branch::Branch;
 
-mod add {
+pub mod add_sub {
     use super::*;
-    pub struct Add {
-        source_reg: Register,
-        dest_reg: Register,
-        immediate: Option<Immediate>,
-        shift: bool,
-        update_flags: bool,
+
+    pub(super) enum AddOrSub {
+        Add,
+        Sub,
     }
 
-    impl Add {
-        pub fn new(dest_reg: Register, source_reg: Register) -> Self {
-            Self {
-                source_reg,
-                dest_reg,
-                immediate: None,
-                shift: false,
-                update_flags: false,
-            }
-        }
+    pub struct AddSubImmediate {
+        pub(super) source_reg: Register,
+        pub(super) dest_reg: Register,
+        pub(super) immediate: Immediate,
+        pub(super) shift: bool,
+        pub(super) update_flags: bool,
+        pub(super) add_or_sub: AddOrSub,
+    }
 
-        pub fn with_immediate(mut self, imm: Immediate) -> Self {
+    impl AddSubImmediate {
+        pub(super) fn new(
+            source_reg: Register,
+            dest_reg: Register,
+            imm: Immediate,
+            add_or_sub: AddOrSub,
+        ) -> Self {
             if imm.0 > 1u32 << 12 {
                 panic!("Immediate is out of range");
             }
-            self.immediate = Some(imm);
-            self
+            Self {
+                source_reg,
+                dest_reg,
+                immediate: imm,
+                shift: false,
+                update_flags: false,
+                add_or_sub,
+            }
         }
-
         /// Shifts the immediate another 12 bits.
         pub fn shifted(mut self) -> Self {
             self.shift = true;
@@ -187,11 +194,38 @@ mod add {
             let dest_reg = (self.dest_reg as u32) << DST_REG_OFFSET;
             let shift = if self.shift { 1 << 22 } else { 0 };
             let update_flags = if self.update_flags { 1 << 29 } else { 0 };
-            let imm = self
-                .immediate
-                .map(|imm| (imm.0 as u32) << IMM_OFFSET)
-                .unwrap();
-            OpCode(OPCODE_BASE | source_reg | dest_reg | shift | imm | update_flags)
+            let imm = (self.immediate.0 as u32) << IMM_OFFSET;
+            let sub = match self.add_or_sub {
+                AddOrSub::Add => 0,
+                AddOrSub::Sub => 1 << 30,
+            };
+            OpCode(OPCODE_BASE | source_reg | dest_reg | shift | imm | update_flags | sub)
+        }
+    }
+}
+
+mod add {
+    use super::*;
+    pub struct Add {
+        source_reg: Register,
+        dest_reg: Register,
+    }
+
+    impl Add {
+        pub fn new(dest_reg: Register, source_reg: Register) -> Self {
+            Self {
+                source_reg,
+                dest_reg,
+            }
+        }
+
+        pub fn with_immediate(self, imm: Immediate) -> super::add_sub::AddSubImmediate {
+            super::add_sub::AddSubImmediate::new(
+                self.source_reg,
+                self.dest_reg,
+                imm,
+                super::add_sub::AddOrSub::Add,
+            )
         }
     }
 }
@@ -219,39 +253,13 @@ mod sub {
             }
         }
 
-        pub fn with_immediate(mut self, imm: Immediate) -> Self {
-            if imm.0 > 1u32 << 12 {
-                panic!("Immediate is out of range");
-            }
-            self.immediate = Some(imm);
-            self
-        }
-
-        /// Shifts the immediate another 12 bits.
-        pub fn shifted(mut self) -> Self {
-            self.shift = true;
-            self
-        }
-
-        pub fn update_flags(mut self) -> Self {
-            self.update_flags = true;
-            self
-        }
-
-        pub fn generate(self) -> OpCode {
-            const OPCODE_BASE: u32 = 0xD1000000;
-            const IMM_OFFSET: usize = 10;
-            const SRC_REG_OFFSET: usize = 5;
-            const DST_REG_OFFSET: usize = 0;
-            let source_reg = (self.source_reg as u32) << SRC_REG_OFFSET;
-            let dest_reg = (self.dest_reg as u32) << DST_REG_OFFSET;
-            let shift = if self.shift { 1 << 22 } else { 0 };
-            let update_flags = if self.update_flags { 1 << 29 } else { 0 };
-            let imm = self
-                .immediate
-                .map(|imm| (imm.0 as u32) << IMM_OFFSET)
-                .unwrap();
-            OpCode(OPCODE_BASE | source_reg | dest_reg | shift | imm | update_flags)
+        pub fn with_immediate(self, imm: Immediate) -> super::add_sub::AddSubImmediate {
+            super::add_sub::AddSubImmediate::new(
+                self.source_reg,
+                self.dest_reg,
+                imm,
+                super::add_sub::AddOrSub::Sub,
+            )
         }
     }
 }
