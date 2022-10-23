@@ -129,7 +129,7 @@ pub fn run_demo() {
 #[cfg(all(test, target_arch = "aarch64"))]
 mod test {
     use super::*;
-    use crate::arm_asm::Sub;
+    use crate::arm_asm::{RegShift, Sub};
     use region::page;
 
     #[test]
@@ -200,5 +200,75 @@ mod test {
 
         let val = unsafe { invoke!(jit_page, extern "C" fn(u64) -> u64, 0x1234) };
         assert_eq!(val, 0x234);
+    }
+
+    #[test]
+    fn test_add_register_not_shifted() {
+        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+
+        jit_page.populate(|opcode_stream| {
+            opcode_stream.push_opcode(
+                Add::new(Register::X0, Register::X0)
+                    .with_shifted_reg(Register::X1)
+                    .generate(),
+            );
+            opcode_stream.push_opcode(Ret::new().generate());
+        });
+
+        let val = unsafe { invoke!(jit_page, extern "C" fn(u64, u64) -> u64, 0x1234, 0x10001) };
+        assert_eq!(val, 0x11235);
+    }
+
+    #[test]
+    fn test_sub_register_not_shifted() {
+        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+
+        jit_page.populate(|opcode_stream| {
+            opcode_stream.push_opcode(
+                Sub::new(Register::X0, Register::X0)
+                    .with_shifted_reg(Register::X1)
+                    .generate(),
+            );
+            opcode_stream.push_opcode(Ret::new().generate());
+        });
+
+        let val = unsafe { invoke!(jit_page, extern "C" fn(u64, u64) -> u64, 1234, 1230) };
+        assert_eq!(val, 4);
+    }
+
+    #[test]
+    fn test_add_register_shifted_left() {
+        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+
+        jit_page.populate(|opcode_stream| {
+            opcode_stream.push_opcode(
+                Add::new(Register::X0, Register::X0)
+                    .with_shifted_reg(Register::X1)
+                    .with_shift(RegShift::Lsl(8))
+                    .generate(),
+            );
+            opcode_stream.push_opcode(Ret::new().generate());
+        });
+
+        let val = unsafe { invoke!(jit_page, extern "C" fn(u64, u64) -> u64, 0x12, 0x23) };
+        assert_eq!(val, 0x2312);
+    }
+
+    #[test]
+    fn test_sub_register_shifted_left() {
+        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+
+        jit_page.populate(|opcode_stream| {
+            opcode_stream.push_opcode(
+                Sub::new(Register::X0, Register::X0)
+                    .with_shifted_reg(Register::X1)
+                    .with_shift(RegShift::Lsl(8))
+                    .generate(),
+            );
+            opcode_stream.push_opcode(Ret::new().generate());
+        });
+
+        let val = unsafe { invoke!(jit_page, extern "C" fn(u64, u64) -> u64, 0x2333, 0x23) };
+        assert_eq!(val, 0x33);
     }
 }

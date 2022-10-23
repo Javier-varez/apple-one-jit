@@ -146,12 +146,12 @@ pub mod add_sub {
     }
 
     pub struct AddSubImmediate {
-        pub(super) source_reg: Register,
-        pub(super) dest_reg: Register,
-        pub(super) immediate: Immediate,
-        pub(super) shift: bool,
-        pub(super) update_flags: bool,
-        pub(super) add_or_sub: AddOrSub,
+        source_reg: Register,
+        dest_reg: Register,
+        immediate: Immediate,
+        shift: bool,
+        update_flags: bool,
+        add_or_sub: AddOrSub,
     }
 
     impl AddSubImmediate {
@@ -195,14 +195,105 @@ pub mod add_sub {
             let shift = if self.shift { 1 << 22 } else { 0 };
             let update_flags = if self.update_flags { 1 << 29 } else { 0 };
             let imm = (self.immediate.0 as u32) << IMM_OFFSET;
-            let sub = match self.add_or_sub {
+            let ty = match self.add_or_sub {
                 AddOrSub::Add => 0,
                 AddOrSub::Sub => 1 << 30,
             };
-            OpCode(OPCODE_BASE | source_reg | dest_reg | shift | imm | update_flags | sub)
+            OpCode(OPCODE_BASE | source_reg | dest_reg | shift | imm | update_flags | ty)
+        }
+    }
+
+    pub enum RegShift {
+        Lsl(u32),
+        Lsr(u32),
+        Asr(u32),
+    }
+
+    impl RegShift {
+        fn validate(&self) -> u32 {
+            let value = match self {
+                RegShift::Lsl(val) => val,
+                RegShift::Lsr(val) => val,
+                RegShift::Asr(val) => val,
+            };
+            const MASK: u32 = 0x3f;
+            assert_eq!(value & !MASK, 0);
+            value & MASK
+        }
+
+        fn value(&self) -> u32 {
+            const SHIFT_TYPE_OFFSET: usize = 22;
+            const SHIFT_VALUE_OFFSET: usize = 10;
+            let shift_type = match self {
+                RegShift::Lsl(_) => (0 << SHIFT_TYPE_OFFSET),
+                RegShift::Lsr(_) => (1 << SHIFT_TYPE_OFFSET),
+                RegShift::Asr(_) => (2 << SHIFT_TYPE_OFFSET),
+            };
+            let shift_value = self.validate();
+
+            (shift_value << SHIFT_VALUE_OFFSET) | (shift_type << SHIFT_TYPE_OFFSET)
+        }
+    }
+
+    pub struct AddSubShiftedRegister {
+        source_reg: Register,
+        second_source_reg: Register,
+        dest_reg: Register,
+        update_flags: bool,
+        reg_shift: Option<RegShift>,
+        add_or_sub: AddOrSub,
+    }
+
+    impl AddSubShiftedRegister {
+        pub(super) fn new(
+            source_reg: Register,
+            dest_reg: Register,
+            second_source_reg: Register,
+            add_or_sub: AddOrSub,
+        ) -> Self {
+            Self {
+                source_reg,
+                dest_reg,
+                second_source_reg,
+                add_or_sub,
+                reg_shift: None,
+                update_flags: false,
+            }
+        }
+
+        /// Shifts the immediate another 12 bits.
+        pub fn update_flags(mut self) -> Self {
+            self.update_flags = true;
+            self
+        }
+
+        pub fn with_shift(mut self, reg_shift: RegShift) -> Self {
+            self.reg_shift = Some(reg_shift);
+            self
+        }
+
+        pub fn generate(self) -> OpCode {
+            const OPCODE_BASE: u32 = 0x0B000000;
+            const SRC_REG2_OFFSET: usize = 16;
+            const SRC_REG_OFFSET: usize = 5;
+            const DST_REG_OFFSET: usize = 0;
+            let source_reg = (self.source_reg as u32) << SRC_REG_OFFSET;
+            let dest_reg = (self.dest_reg as u32) << DST_REG_OFFSET;
+            let second_source_reg = (self.second_source_reg as u32) << SRC_REG2_OFFSET;
+            let shift = self.reg_shift.map(|shift| shift.value()).unwrap_or(0);
+            let update_flags = if self.update_flags { 1 << 29 } else { 0 };
+            let ty = match self.add_or_sub {
+                AddOrSub::Add => 0,
+                AddOrSub::Sub => 1 << 30,
+            };
+            OpCode(
+                OPCODE_BASE | source_reg | dest_reg | second_source_reg | shift | update_flags | ty,
+            )
         }
     }
 }
+
+pub use add_sub::RegShift;
 
 mod add {
     use super::*;
@@ -224,6 +315,15 @@ mod add {
                 self.source_reg,
                 self.dest_reg,
                 imm,
+                super::add_sub::AddOrSub::Add,
+            )
+        }
+
+        pub fn with_shifted_reg(self, reg: Register) -> super::add_sub::AddSubShiftedRegister {
+            super::add_sub::AddSubShiftedRegister::new(
+                self.source_reg,
+                self.dest_reg,
+                reg,
                 super::add_sub::AddOrSub::Add,
             )
         }
@@ -258,6 +358,15 @@ mod sub {
                 self.source_reg,
                 self.dest_reg,
                 imm,
+                super::add_sub::AddOrSub::Sub,
+            )
+        }
+
+        pub fn with_shifted_reg(self, reg: Register) -> super::add_sub::AddSubShiftedRegister {
+            super::add_sub::AddSubShiftedRegister::new(
+                self.source_reg,
+                self.dest_reg,
+                reg,
                 super::add_sub::AddOrSub::Sub,
             )
         }
