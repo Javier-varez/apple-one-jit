@@ -129,7 +129,7 @@ pub fn run_demo() {
 #[cfg(all(test, target_arch = "aarch64"))]
 mod test {
     use super::*;
-    use crate::arm_asm::{RegShift, Sub};
+    use crate::arm_asm::{And, Or, RegShift, Sub, Xor};
     use region::page;
 
     #[test]
@@ -270,5 +270,56 @@ mod test {
 
         let val = unsafe { invoke!(jit_page, extern "C" fn(u64, u64) -> u64, 0x2333, 0x23) };
         assert_eq!(val, 0x33);
+    }
+
+    #[test]
+    fn test_or_immediate() {
+        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+
+        jit_page.populate(|opcode_stream| {
+            opcode_stream.push_opcode(
+                Or::new(Register::X0, Register::X0)
+                    .with_immediate(Immediate::new(0x1111_1111_1111_1111u64))
+                    .generate(),
+            );
+            opcode_stream.push_opcode(Ret::new().generate());
+        });
+
+        let val = unsafe { invoke!(jit_page, extern "C" fn(u64) -> u64, 0xAAAA_0000_FFFF_5555) };
+        assert_eq!(val, 0xBBBB_1111_FFFF_5555);
+    }
+
+    #[test]
+    fn test_xor_immediate() {
+        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+
+        jit_page.populate(|opcode_stream| {
+            opcode_stream.push_opcode(
+                Xor::new(Register::X0, Register::X0)
+                    .with_immediate(Immediate::new(0xdddd_dddd_dddd_ddddu64))
+                    .generate(),
+            );
+            opcode_stream.push_opcode(Ret::new().generate());
+        });
+
+        let val = unsafe { invoke!(jit_page, extern "C" fn(u64) -> u64, 0xAAAA_0000_FFFF_5555) };
+        assert_eq!(val, 0x7777_dddd_2222_8888);
+    }
+
+    #[test]
+    fn test_and_immediate() {
+        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+
+        jit_page.populate(|opcode_stream| {
+            opcode_stream.push_opcode(
+                And::new(Register::X0, Register::X0)
+                    .with_immediate(Immediate::new(0xff00_ff00_ff00_ff00u64))
+                    .generate(),
+            );
+            opcode_stream.push_opcode(Ret::new().generate());
+        });
+
+        let val = unsafe { invoke!(jit_page, extern "C" fn(u64) -> u64, 0xAAAA_0000_FFFF_5555) };
+        assert_eq!(val, 0xaa00_0000_ff00_5500);
     }
 }

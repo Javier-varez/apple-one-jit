@@ -7,10 +7,20 @@ impl OpCode {
     }
 }
 
-pub struct Immediate(u32);
+pub trait OperandType {}
+
+pub struct UnknownOperand {}
+pub struct ImmediateOperand {}
+pub struct RegisterOperand {}
+
+impl OperandType for UnknownOperand {}
+impl OperandType for ImmediateOperand {}
+impl OperandType for RegisterOperand {}
+
+pub struct Immediate(u64);
 
 impl Immediate {
-    pub fn new(val: u32) -> Self {
+    pub fn new(val: u64) -> Self {
         Self(val)
     }
 }
@@ -161,7 +171,7 @@ pub mod add_sub {
             imm: Immediate,
             add_or_sub: AddOrSub,
         ) -> Self {
-            if imm.0 > 1u32 << 12 {
+            if imm.0 > 1u64 << 12 {
                 panic!("Immediate is out of range");
             }
             Self {
@@ -337,9 +347,6 @@ mod sub {
     pub struct Sub {
         source_reg: Register,
         dest_reg: Register,
-        immediate: Option<Immediate>,
-        shift: bool,
-        update_flags: bool,
     }
 
     impl Sub {
@@ -347,9 +354,6 @@ mod sub {
             Self {
                 source_reg,
                 dest_reg,
-                immediate: None,
-                shift: false,
-                update_flags: false,
             }
         }
 
@@ -374,3 +378,159 @@ mod sub {
 }
 
 pub use sub::Sub;
+
+mod logical_op {
+    use super::*;
+    use std::marker::PhantomData;
+
+    #[repr(u8)]
+    enum Operation {
+        And = 0,
+        Or = 1,
+        Xor = 2,
+    }
+
+    pub struct LogicalOperation<const OP: u8, ArgumentType: OperandType> {
+        source_reg: Register,
+        dest_reg: Register,
+        immediate: Option<Immediate>,
+        _pd: PhantomData<ArgumentType>,
+    }
+
+    /// Creates a logical operation with the given intermediate as the second argument
+    impl<const OP: u8> LogicalOperation<OP, UnknownOperand> {
+        pub fn new(dest_reg: Register, source_reg: Register) -> Self {
+            Self {
+                dest_reg,
+                source_reg,
+                immediate: None,
+                _pd: PhantomData {},
+            }
+        }
+
+        /// Creates a logical operation with the given intermediate as the second argument
+        pub fn with_immediate(self, imm: Immediate) -> LogicalOperation<OP, ImmediateOperand> {
+            LogicalOperation::<OP, ImmediateOperand> {
+                source_reg: self.source_reg,
+                dest_reg: self.dest_reg,
+                immediate: Some(imm),
+                _pd: PhantomData {},
+            }
+        }
+    }
+
+    fn is_mask(value: u64) -> bool {
+        (value & (value + 1)) == 0
+    }
+
+    fn is_shifted_mask(value: u64) -> bool {
+        (value != 0) && (is_mask(value | (value - 1)))
+    }
+
+    impl<const OP: u8> LogicalOperation<OP, ImmediateOperand> {
+        fn encode_immediate(&self) -> (u32, u32, u32) {
+            let immediate: u64 = self
+                .immediate
+                .as_ref()
+                .map(|imm| imm.0)
+                .expect("LogicalOperation should contain an immediate value to encode");
+
+            if (immediate == 0) || (immediate == 0xffff_ffff_ffff_ffffu64) {
+                panic!("Immediate must not be all 0's or all 1's");
+            }
+
+            // Calculate the size of the immediate
+            let mut size = 64;
+            while size > 2 {
+                size = size / 2;
+                let mask = (1 << size) - 1;
+
+                if (immediate & mask) != ((immediate >> size) & mask) {
+                    // The pattern does not work anymore
+                    size *= 2;
+                    break;
+                }
+            }
+
+            let mask = 0xffff_ffff_ffff_ffffu64 >> (64 - size);
+            let mut sized_immediate = immediate & mask;
+
+            let (rol, num_bits) = if is_shifted_mask(sized_immediate) {
+                let rol = u64::trailing_zeros(sized_immediate);
+                let num_bits = u64::trailing_zeros(!(sized_immediate >> rol));
+                (rol, num_bits)
+            } else {
+                sized_immediate |= !mask;
+                assert!(is_shifted_mask(!sized_immediate));
+                let leading_ones = u64::leading_zeros(!sized_immediate);
+                let trailing_ones = u64::trailing_zeros(!(sized_immediate));
+                let num_bits = leading_ones + trailing_ones + size - 64;
+                let rol = 64 - leading_ones;
+                (rol, num_bits)
+            };
+
+            let nimms = !(size - 1) << 1;
+            let nimms = nimms | (num_bits - 1);
+            let n = ((nimms >> 6) & 1) ^ 1;
+            let imms = nimms & 0x3f;
+            let immr = (size - rol) & (size - 1);
+
+            (n, immr, imms)
+        }
+
+        pub fn generate(self) -> OpCode {
+            let (n, immr, imms) = self.encode_immediate();
+            const OPCODE_BASE: u32 = 0x92000000;
+            const SRC_REG_OFFSET: usize = 5;
+            const DST_REG_OFFSET: usize = 0;
+            const IMMS_OFFSET: usize = 10;
+            const IMMR_OFFSET: usize = 16;
+            const N_OFFSET: usize = 22;
+            const TYPE_OFFSET: usize = 29;
+            let source_reg = (self.source_reg as u32) << SRC_REG_OFFSET;
+            let dest_reg = (self.dest_reg as u32) << DST_REG_OFFSET;
+            let n = n << N_OFFSET;
+            let immr = immr << IMMR_OFFSET;
+            let imms = imms << IMMS_OFFSET;
+            let ty = (OP as u32) << TYPE_OFFSET;
+            OpCode(OPCODE_BASE | source_reg | dest_reg | n | immr | imms | ty)
+        }
+    }
+
+    /// A logical `OR` operation
+    /// Example:
+    /// ```
+    ///     let opcode = Or::new(
+    ///             Register::X0,
+    ///             Register::X1
+    ///         )
+    ///         .with_immediate(Immediate::new(0xaaaaaaaaaaaaaaaa)).generate();
+    /// ```
+    pub type Or = LogicalOperation<{ Operation::Or as u8 }, UnknownOperand>;
+
+    /// A logical `AND` operation
+    /// Example:
+    /// ```
+    ///     let opcode = And::new(
+    ///             Register::X0,
+    ///             Register::X1
+    ///         )
+    ///         .with_immediate(Immediate::new(0xaaaaaaaaaaaaaaaa)).generate();
+    /// ```
+    pub type And = LogicalOperation<{ Operation::And as u8 }, UnknownOperand>;
+
+    /// A logical `XOR` operation
+    /// Example:
+    /// ```
+    ///     let opcode = Xor::new(
+    ///             Register::X0,
+    ///             Register::X1
+    ///         )
+    ///         .with_immediate(Immediate::new(0xaaaaaaaaaaaaaaaa)).generate();
+    /// ```
+    pub type Xor = LogicalOperation<{ Operation::Xor as u8 }, UnknownOperand>;
+}
+
+pub use logical_op::And;
+pub use logical_op::Or;
+pub use logical_op::Xor;
