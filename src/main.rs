@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 
-mod arm_asm;
-mod jit;
+use apple_one_jit::jit;
 
 fn main() {
     jit::run_demo();

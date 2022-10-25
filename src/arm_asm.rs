@@ -1,7 +1,10 @@
 /// This module provides functions to dynamically assemble armv8-a machine code.
 
+/// Represents an opcode for a single Aarch64 machine instruction
 pub struct OpCode(u32);
+
 impl OpCode {
+    /// Obtains the underlying value of the opcode
     pub fn value(&self) -> u32 {
         self.0
     }
@@ -9,22 +12,17 @@ impl OpCode {
 
 pub trait OperandType {}
 
-pub struct UnknownOperand {}
-pub struct ImmediateOperand {}
-pub struct RegisterOperand {}
-
-impl OperandType for UnknownOperand {}
-impl OperandType for ImmediateOperand {}
-impl OperandType for RegisterOperand {}
-
+/// Immediate argument for a machine code instruction
 pub struct Immediate(u64);
 
 impl Immediate {
+    /// Constructs a new immediate from the given value
     pub fn new(val: u64) -> Self {
         Self(val)
     }
 }
 
+/// Aarch64 Machine registers
 pub enum Register {
     X0 = 0,
     X1 = 1,
@@ -60,16 +58,31 @@ pub enum Register {
     SP = 31,
 }
 
+pub struct UnknownOperand {}
+pub struct ImmediateOperand {}
+pub struct RegisterOperand {}
+
+impl OperandType for UnknownOperand {}
+impl OperandType for ImmediateOperand {}
+impl OperandType for RegisterOperand {}
+
 mod udf {
     use super::*;
 
+    /// Aarch64 `udf` asm instruction. Causes an exception if executed
+    /// ```
+    ///     use apple_one_jit::arm_asm::Udf;
+    ///     let opcode = Udf::new().generate();
+    /// ```
     pub struct Udf();
 
     impl Udf {
+        /// Constructs a new Udf instruction
         pub fn new() -> Self {
             Self()
         }
 
+        /// Generates the opcode for the instruction
         pub fn generate(self) -> OpCode {
             OpCode(0)
         }
@@ -80,18 +93,28 @@ pub use udf::Udf;
 
 mod ret {
     use super::*;
+
+    /// Aarch64 `ret` asm instruction. Returns execution to the caller, replacing the program
+    /// counter by the value in the selected register (X30, also known as LR, by default)
     pub struct Ret(Register);
 
     impl Ret {
+        /// Constructs a new Ret instruction
+        /// ```
+        ///     use apple_one_jit::arm_asm::{Ret, Register};
+        ///     let opcode = Ret::new().with_register(Register::X30).generate();
+        /// ```
         pub fn new() -> Self {
             Self(Register::X30)
         }
 
-        pub fn set_register(mut self, register: Register) -> Self {
+        /// Sets the register to use for the ret instruction
+        pub fn with_register(mut self, register: Register) -> Self {
             self.0 = register;
             self
         }
 
+        /// Generates the opcode for the instruction
         pub fn generate(self) -> OpCode {
             const OPCODE_BASE: u32 = 0xD65F0000;
             const REG_OFFSET: usize = 5;
@@ -124,16 +147,17 @@ mod branch {
             }
         }
 
-        pub fn register(mut self, reg: Register) -> Self {
+        pub fn with_register(mut self, reg: Register) -> Self {
             self.branch_target = Some(BranchTarget::Register(reg));
             self
         }
 
-        pub fn pc_relative(mut self, imm: Immediate) -> Self {
+        pub fn with_immediate(mut self, imm: Immediate) -> Self {
             self.branch_target = Some(BranchTarget::Immediate(imm));
             self
         }
 
+        /// If called, stores the return address in X30 when branching
         pub fn link(mut self) -> Self {
             self.link = true;
             self
@@ -147,75 +171,23 @@ mod branch {
 
 pub use branch::Branch;
 
-pub mod add_sub {
+pub mod arithmetic {
     use super::*;
+    use std::marker::PhantomData;
 
-    pub(super) enum AddOrSub {
-        Add,
-        Sub,
+    #[repr(u8)]
+    enum Operation {
+        Add = 0,
+        Sub = 1,
     }
 
-    pub struct AddSubImmediate {
-        source_reg: Register,
-        dest_reg: Register,
-        immediate: Immediate,
-        shift: bool,
-        update_flags: bool,
-        add_or_sub: AddOrSub,
-    }
-
-    impl AddSubImmediate {
-        pub(super) fn new(
-            source_reg: Register,
-            dest_reg: Register,
-            imm: Immediate,
-            add_or_sub: AddOrSub,
-        ) -> Self {
-            if imm.0 > 1u64 << 12 {
-                panic!("Immediate is out of range");
-            }
-            Self {
-                source_reg,
-                dest_reg,
-                immediate: imm,
-                shift: false,
-                update_flags: false,
-                add_or_sub,
-            }
-        }
-        /// Shifts the immediate another 12 bits.
-        pub fn shifted(mut self) -> Self {
-            self.shift = true;
-            self
-        }
-
-        /// Shifts the immediate another 12 bits.
-        pub fn update_flags(mut self) -> Self {
-            self.update_flags = true;
-            self
-        }
-
-        pub fn generate(self) -> OpCode {
-            const OPCODE_BASE: u32 = 0x91000000;
-            const IMM_OFFSET: usize = 10;
-            const SRC_REG_OFFSET: usize = 5;
-            const DST_REG_OFFSET: usize = 0;
-            let source_reg = (self.source_reg as u32) << SRC_REG_OFFSET;
-            let dest_reg = (self.dest_reg as u32) << DST_REG_OFFSET;
-            let shift = if self.shift { 1 << 22 } else { 0 };
-            let update_flags = if self.update_flags { 1 << 29 } else { 0 };
-            let imm = (self.immediate.0 as u32) << IMM_OFFSET;
-            let ty = match self.add_or_sub {
-                AddOrSub::Add => 0,
-                AddOrSub::Sub => 1 << 30,
-            };
-            OpCode(OPCODE_BASE | source_reg | dest_reg | shift | imm | update_flags | ty)
-        }
-    }
-
+    /// Register shift type
     pub enum RegShift {
+        /// Logical shift left
         Lsl(u32),
+        /// Logical shift right (no sign extension)
         Lsr(u32),
+        /// Arithmetic shift right (sign-extends)
         Asr(u32),
     }
 
@@ -245,139 +217,157 @@ pub mod add_sub {
         }
     }
 
-    pub struct AddSubShiftedRegister {
-        source_reg: Register,
-        second_source_reg: Register,
-        dest_reg: Register,
-        update_flags: bool,
-        reg_shift: Option<RegShift>,
-        add_or_sub: AddOrSub,
+    struct ImmediateArgs {
+        immediate: Immediate,
+        shift: bool,
     }
 
-    impl AddSubShiftedRegister {
-        pub(super) fn new(
-            source_reg: Register,
-            dest_reg: Register,
-            second_source_reg: Register,
-            add_or_sub: AddOrSub,
-        ) -> Self {
-            Self {
-                source_reg,
-                dest_reg,
-                second_source_reg,
-                add_or_sub,
-                reg_shift: None,
-                update_flags: false,
-            }
-        }
+    struct RegisterArgs {
+        second_source_reg: Register,
+        reg_shift: Option<RegShift>,
+    }
 
-        /// Shifts the immediate another 12 bits.
+    /// Aarch64 asm arithmetic instructions.
+    pub struct ArithmeticOp<const OP: u8, T: OperandType> {
+        source_reg: Register,
+        dest_reg: Register,
+        update_flags: bool,
+        immediate: Option<ImmediateArgs>,
+        register: Option<RegisterArgs>,
+        _pd: PhantomData<T>,
+    }
+
+    impl<const OP: u8, T: OperandType> ArithmeticOp<OP, T> {
+        /// Updates the flags after the operation
         pub fn update_flags(mut self) -> Self {
             self.update_flags = true;
             self
         }
+    }
 
-        pub fn with_shift(mut self, reg_shift: RegShift) -> Self {
-            self.reg_shift = Some(reg_shift);
+    impl<const OP: u8> ArithmeticOp<OP, UnknownOperand> {
+        /// Constructs the arithmetic operation
+        pub fn new(dest_reg: Register, source_reg: Register) -> Self {
+            Self {
+                source_reg,
+                dest_reg,
+                update_flags: false,
+                immediate: None,
+                register: None,
+                _pd: PhantomData {},
+            }
+        }
+
+        /// Selects the immediate operation type
+        pub fn with_immediate(self, imm: Immediate) -> ArithmeticOp<OP, ImmediateOperand> {
+            ArithmeticOp::<OP, ImmediateOperand> {
+                source_reg: self.source_reg,
+                dest_reg: self.dest_reg,
+                update_flags: self.update_flags,
+                immediate: Some(ImmediateArgs {
+                    immediate: imm,
+                    shift: false,
+                }),
+                register: None,
+                _pd: PhantomData {},
+            }
+        }
+
+        /// Selects the shifted register operation type
+        pub fn with_shifted_reg(self, reg: Register) -> ArithmeticOp<OP, RegisterOperand> {
+            ArithmeticOp::<OP, RegisterOperand> {
+                source_reg: self.source_reg,
+                dest_reg: self.dest_reg,
+                update_flags: self.update_flags,
+                immediate: None,
+                register: Some(RegisterArgs {
+                    second_source_reg: reg,
+                    reg_shift: None,
+                }),
+                _pd: PhantomData {},
+            }
+        }
+    }
+
+    impl<const OP: u8> ArithmeticOp<OP, ImmediateOperand> {
+        /// Shifts the immediate another 12 bits.
+        pub fn shifted(mut self) -> Self {
+            self.immediate.as_mut().unwrap().shift = true;
             self
         }
 
+        /// Generates the opcode for this instruction
+        pub fn generate(self) -> OpCode {
+            const OPCODE_BASE: u32 = 0x91000000;
+            const IMM_OFFSET: usize = 10;
+            const SRC_REG_OFFSET: usize = 5;
+            const DST_REG_OFFSET: usize = 0;
+            let ImmediateArgs { immediate, shift } = self.immediate.unwrap();
+
+            let source_reg = (self.source_reg as u32) << SRC_REG_OFFSET;
+            let dest_reg = (self.dest_reg as u32) << DST_REG_OFFSET;
+            let shift = if shift { 1 << 22 } else { 0 };
+            let update_flags = if self.update_flags { 1 << 29 } else { 0 };
+            let imm = (immediate.0 as u32) << IMM_OFFSET;
+            let ty = (OP as u32) << 30;
+            OpCode(OPCODE_BASE | source_reg | dest_reg | shift | imm | update_flags | ty)
+        }
+    }
+
+    impl<const OP: u8> ArithmeticOp<OP, RegisterOperand> {
+        /// Shifts the second register operand before performing the arithmetic operation
+        pub fn with_shift(mut self, reg_shift: RegShift) -> Self {
+            self.register.as_mut().unwrap().reg_shift.replace(reg_shift);
+            self
+        }
+
+        /// Generates the opcode for this instruction
         pub fn generate(self) -> OpCode {
             const OPCODE_BASE: u32 = 0x0B000000;
             const SRC_REG2_OFFSET: usize = 16;
             const SRC_REG_OFFSET: usize = 5;
             const DST_REG_OFFSET: usize = 0;
+            let RegisterArgs {
+                reg_shift,
+                second_source_reg,
+            } = self.register.unwrap();
+
             let source_reg = (self.source_reg as u32) << SRC_REG_OFFSET;
             let dest_reg = (self.dest_reg as u32) << DST_REG_OFFSET;
-            let second_source_reg = (self.second_source_reg as u32) << SRC_REG2_OFFSET;
-            let shift = self.reg_shift.map(|shift| shift.value()).unwrap_or(0);
+            let second_source_reg = (second_source_reg as u32) << SRC_REG2_OFFSET;
+            let shift = reg_shift.map(|shift| shift.value()).unwrap_or(0);
             let update_flags = if self.update_flags { 1 << 29 } else { 0 };
-            let ty = match self.add_or_sub {
-                AddOrSub::Add => 0,
-                AddOrSub::Sub => 1 << 30,
-            };
+            let ty = (OP as u32) << 30;
             OpCode(
                 OPCODE_BASE | source_reg | dest_reg | second_source_reg | shift | update_flags | ty,
             )
         }
     }
+
+    /// An arithmetic Add instruction for Aarch64
+    /// ```
+    ///     use apple_one_jit::arm_asm::{Register, Add, RegShift};
+    ///     let opcode = Add::new(
+    ///             Register::X0,
+    ///             Register::X1
+    ///         )
+    ///         .with_shifted_reg(Register::X30).with_shift(RegShift::Lsl(2)).generate();
+    /// ```
+    pub type Add = ArithmeticOp<{ Operation::Add as u8 }, UnknownOperand>;
+
+    /// An arithmetic Sub instruction for Aarch64
+    /// ```
+    ///     use apple_one_jit::arm_asm::{Register, Sub, RegShift};
+    ///     let opcode = Sub::new(
+    ///             Register::X0,
+    ///             Register::X1
+    ///         )
+    ///         .with_shifted_reg(Register::X30).with_shift(RegShift::Asr(3)).generate();
+    /// ```
+    pub type Sub = ArithmeticOp<{ Operation::Sub as u8 }, UnknownOperand>;
 }
 
-pub use add_sub::RegShift;
-
-mod add {
-    use super::*;
-    pub struct Add {
-        source_reg: Register,
-        dest_reg: Register,
-    }
-
-    impl Add {
-        pub fn new(dest_reg: Register, source_reg: Register) -> Self {
-            Self {
-                source_reg,
-                dest_reg,
-            }
-        }
-
-        pub fn with_immediate(self, imm: Immediate) -> super::add_sub::AddSubImmediate {
-            super::add_sub::AddSubImmediate::new(
-                self.source_reg,
-                self.dest_reg,
-                imm,
-                super::add_sub::AddOrSub::Add,
-            )
-        }
-
-        pub fn with_shifted_reg(self, reg: Register) -> super::add_sub::AddSubShiftedRegister {
-            super::add_sub::AddSubShiftedRegister::new(
-                self.source_reg,
-                self.dest_reg,
-                reg,
-                super::add_sub::AddOrSub::Add,
-            )
-        }
-    }
-}
-
-pub use add::Add;
-
-mod sub {
-    use super::*;
-    pub struct Sub {
-        source_reg: Register,
-        dest_reg: Register,
-    }
-
-    impl Sub {
-        pub fn new(dest_reg: Register, source_reg: Register) -> Self {
-            Self {
-                source_reg,
-                dest_reg,
-            }
-        }
-
-        pub fn with_immediate(self, imm: Immediate) -> super::add_sub::AddSubImmediate {
-            super::add_sub::AddSubImmediate::new(
-                self.source_reg,
-                self.dest_reg,
-                imm,
-                super::add_sub::AddOrSub::Sub,
-            )
-        }
-
-        pub fn with_shifted_reg(self, reg: Register) -> super::add_sub::AddSubShiftedRegister {
-            super::add_sub::AddSubShiftedRegister::new(
-                self.source_reg,
-                self.dest_reg,
-                reg,
-                super::add_sub::AddOrSub::Sub,
-            )
-        }
-    }
-}
-
-pub use sub::Sub;
+pub use arithmetic::{Add, RegShift, Sub};
 
 mod logical_op {
     use super::*;
@@ -498,8 +488,8 @@ mod logical_op {
     }
 
     /// A logical `OR` operation
-    /// Example:
     /// ```
+    ///     use apple_one_jit::arm_asm::{Register, Or, Immediate};
     ///     let opcode = Or::new(
     ///             Register::X0,
     ///             Register::X1
@@ -509,8 +499,8 @@ mod logical_op {
     pub type Or = LogicalOperation<{ Operation::Or as u8 }, UnknownOperand>;
 
     /// A logical `AND` operation
-    /// Example:
     /// ```
+    ///     use apple_one_jit::arm_asm::{Register, And, Immediate};
     ///     let opcode = And::new(
     ///             Register::X0,
     ///             Register::X1
@@ -520,8 +510,8 @@ mod logical_op {
     pub type And = LogicalOperation<{ Operation::And as u8 }, UnknownOperand>;
 
     /// A logical `XOR` operation
-    /// Example:
     /// ```
+    ///     use apple_one_jit::arm_asm::{Register, Xor, Immediate};
     ///     let opcode = Xor::new(
     ///             Register::X0,
     ///             Register::X1
