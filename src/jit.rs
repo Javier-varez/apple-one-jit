@@ -322,4 +322,79 @@ mod test {
         let val = unsafe { invoke!(jit_page, extern "C" fn(u64) -> u64, 0xAAAA_0000_FFFF_5555) };
         assert_eq!(val, 0xaa00_0000_ff00_5500);
     }
+
+    #[test]
+    fn test_or_register() {
+        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+
+        jit_page.populate(|opcode_stream| {
+            opcode_stream.push_opcode(
+                Or::new(Register::X0, Register::X0)
+                    .with_shifted_reg(Register::X1)
+                    .with_shift(RegShift::Lsl(8))
+                    .generate(),
+            );
+            opcode_stream.push_opcode(Ret::new().generate());
+        });
+
+        let val = unsafe {
+            invoke!(
+                jit_page,
+                extern "C" fn(u64, u64) -> u64,
+                0xAAAA_0000_FFFF_5555,
+                0x5555_0000_AAAA_FFFF
+            )
+        };
+        assert_eq!(val, 0xFFAA_00AA_FFFF_FF55);
+    }
+
+    #[test]
+    fn test_and_register() {
+        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+
+        jit_page.populate(|opcode_stream| {
+            opcode_stream.push_opcode(
+                And::new(Register::X0, Register::X0)
+                    .with_shifted_reg(Register::X1)
+                    .with_shift(RegShift::Lsl(8))
+                    .generate(),
+            );
+            opcode_stream.push_opcode(Ret::new().generate());
+        });
+
+        let val = unsafe {
+            invoke!(
+                jit_page,
+                extern "C" fn(u64, u64) -> u64,
+                0xAAAA_0000_FFFF_5555,
+                0x5555_0000_AAAA_FFFF
+            )
+        };
+        assert_eq!(val, 0x0000_0000_AAFF_5500);
+    }
+
+    #[test]
+    fn test_xor_register() {
+        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+
+        jit_page.populate(|opcode_stream| {
+            opcode_stream.push_opcode(
+                Xor::new(Register::X0, Register::X0)
+                    .with_shifted_reg(Register::X1)
+                    .with_shift(RegShift::Lsl(8))
+                    .generate(),
+            );
+            opcode_stream.push_opcode(Ret::new().generate());
+        });
+
+        let val = unsafe {
+            invoke!(
+                jit_page,
+                extern "C" fn(u64, u64) -> u64,
+                0xAAAA_0000_FFFF_5555,
+                0x5555_0000_AAAA_FFFF
+            )
+        };
+        assert_eq!(val, 0xFFAA_00AA_5500_AA55);
+    }
 }

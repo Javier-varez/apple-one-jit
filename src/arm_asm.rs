@@ -176,6 +176,46 @@ mod branch {
 
 pub use branch::Branch;
 
+/// Register shift type
+pub enum RegShift {
+    /// Logical shift left
+    Lsl(u32),
+    /// Logical shift right (no sign extension)
+    Lsr(u32),
+    /// Arithmetic shift right (sign-extends)
+    Asr(u32),
+    /// Rotate right
+    Ror(u32),
+}
+
+impl RegShift {
+    fn validate(&self) -> u32 {
+        let value = match self {
+            RegShift::Lsl(val) => val,
+            RegShift::Lsr(val) => val,
+            RegShift::Asr(val) => val,
+            RegShift::Ror(val) => val,
+        };
+        const MASK: u32 = 0x3f;
+        assert_eq!(value & !MASK, 0);
+        value & MASK
+    }
+
+    fn value(&self) -> u32 {
+        const SHIFT_TYPE_OFFSET: usize = 22;
+        const SHIFT_VALUE_OFFSET: usize = 10;
+        let shift_type = match self {
+            RegShift::Lsl(_) => (0 << SHIFT_TYPE_OFFSET),
+            RegShift::Lsr(_) => (1 << SHIFT_TYPE_OFFSET),
+            RegShift::Asr(_) => (2 << SHIFT_TYPE_OFFSET),
+            RegShift::Ror(_) => (3 << SHIFT_TYPE_OFFSET),
+        };
+        let shift_value = self.validate();
+
+        (shift_value << SHIFT_VALUE_OFFSET) | (shift_type << SHIFT_TYPE_OFFSET)
+    }
+}
+
 mod arithmetic {
     use super::*;
     use std::marker::PhantomData;
@@ -184,42 +224,6 @@ mod arithmetic {
     enum Operation {
         Add = 0,
         Sub = 1,
-    }
-
-    /// Register shift type
-    pub enum RegShift {
-        /// Logical shift left
-        Lsl(u32),
-        /// Logical shift right (no sign extension)
-        Lsr(u32),
-        /// Arithmetic shift right (sign-extends)
-        Asr(u32),
-    }
-
-    impl RegShift {
-        fn validate(&self) -> u32 {
-            let value = match self {
-                RegShift::Lsl(val) => val,
-                RegShift::Lsr(val) => val,
-                RegShift::Asr(val) => val,
-            };
-            const MASK: u32 = 0x3f;
-            assert_eq!(value & !MASK, 0);
-            value & MASK
-        }
-
-        fn value(&self) -> u32 {
-            const SHIFT_TYPE_OFFSET: usize = 22;
-            const SHIFT_VALUE_OFFSET: usize = 10;
-            let shift_type = match self {
-                RegShift::Lsl(_) => (0 << SHIFT_TYPE_OFFSET),
-                RegShift::Lsr(_) => (1 << SHIFT_TYPE_OFFSET),
-                RegShift::Asr(_) => (2 << SHIFT_TYPE_OFFSET),
-            };
-            let shift_value = self.validate();
-
-            (shift_value << SHIFT_VALUE_OFFSET) | (shift_type << SHIFT_TYPE_OFFSET)
-        }
     }
 
     struct ImmediateArgs {
@@ -328,7 +332,7 @@ mod arithmetic {
 
         /// Generates the opcode for this instruction
         pub fn generate(self) -> OpCode {
-            const OPCODE_BASE: u32 = 0x0B000000;
+            const OPCODE_BASE: u32 = 0x8B000000;
             const SRC_REG2_OFFSET: usize = 16;
             const SRC_REG_OFFSET: usize = 5;
             const DST_REG_OFFSET: usize = 0;
@@ -373,7 +377,6 @@ mod arithmetic {
 }
 
 pub use arithmetic::Add;
-pub use arithmetic::RegShift;
 pub use arithmetic::Sub;
 
 mod logical_op {
@@ -387,10 +390,16 @@ mod logical_op {
         Xor = 2,
     }
 
+    struct RegisterArgs {
+        register: Register,
+        reg_shift: Option<RegShift>,
+    }
+
     pub struct LogicalOperation<const OP: u8, ArgumentType: operand::OperandType> {
         source_reg: Register,
         dest_reg: Register,
         immediate: Option<Immediate>,
+        register: Option<RegisterArgs>,
         _pd: PhantomData<ArgumentType>,
     }
 
@@ -401,11 +410,12 @@ mod logical_op {
                 dest_reg,
                 source_reg,
                 immediate: None,
+                register: None,
                 _pd: PhantomData {},
             }
         }
 
-        /// Creates a logical operation with the given intermediate as the second argument
+        /// Creates a logical operation with the given intermediate as the second operand
         pub fn with_immediate(
             self,
             imm: Immediate,
@@ -414,6 +424,24 @@ mod logical_op {
                 source_reg: self.source_reg,
                 dest_reg: self.dest_reg,
                 immediate: Some(imm),
+                register: None,
+                _pd: PhantomData {},
+            }
+        }
+
+        /// Creates a logical operation with the given register as the second operand
+        pub fn with_shifted_reg(
+            self,
+            register: Register,
+        ) -> LogicalOperation<OP, operand::RegisterOperand> {
+            LogicalOperation::<OP, operand::RegisterOperand> {
+                source_reg: self.source_reg,
+                dest_reg: self.dest_reg,
+                immediate: None,
+                register: Some(RegisterArgs {
+                    register,
+                    reg_shift: None,
+                }),
                 _pd: PhantomData {},
             }
         }
@@ -494,6 +522,34 @@ mod logical_op {
             let imms = imms << IMMS_OFFSET;
             let ty = (OP as u32) << TYPE_OFFSET;
             OpCode(OPCODE_BASE | source_reg | dest_reg | n | immr | imms | ty)
+        }
+    }
+
+    impl<const OP: u8> LogicalOperation<OP, operand::RegisterOperand> {
+        /// Shifts the second register operand before performing the arithmetic operation
+        pub fn with_shift(mut self, reg_shift: RegShift) -> Self {
+            self.register.as_mut().unwrap().reg_shift.replace(reg_shift);
+            self
+        }
+
+        /// Generates the opcode for this instruction
+        pub fn generate(self) -> OpCode {
+            const OPCODE_BASE: u32 = 0x8A000000;
+            const SRC_REG2_OFFSET: usize = 16;
+            const SRC_REG_OFFSET: usize = 5;
+            const DST_REG_OFFSET: usize = 0;
+            const TYPE_OFFSET: usize = 29;
+            let RegisterArgs {
+                reg_shift,
+                register: second_source_reg,
+            } = self.register.unwrap();
+
+            let source_reg = (self.source_reg as u32) << SRC_REG_OFFSET;
+            let dest_reg = (self.dest_reg as u32) << DST_REG_OFFSET;
+            let second_source_reg = (second_source_reg as u32) << SRC_REG2_OFFSET;
+            let shift = reg_shift.map(|shift| shift.value()).unwrap_or(0);
+            let ty = (OP as u32) << TYPE_OFFSET;
+            OpCode(OPCODE_BASE | source_reg | dest_reg | second_source_reg | shift | ty)
         }
     }
 
