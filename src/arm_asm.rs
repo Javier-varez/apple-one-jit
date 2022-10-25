@@ -1,4 +1,4 @@
-/// This module provides functions to dynamically assemble armv8-a machine code.
+//! This module provides functions to dynamically assemble armv8-a machine code.
 
 /// Represents an opcode for a single Aarch64 machine instruction
 pub struct OpCode(u32);
@@ -9,8 +9,6 @@ impl OpCode {
         self.0
     }
 }
-
-pub trait OperandType {}
 
 /// Immediate argument for a machine code instruction
 pub struct Immediate(u64);
@@ -58,18 +56,23 @@ pub enum Register {
     SP = 31,
 }
 
-pub struct UnknownOperand {}
-pub struct ImmediateOperand {}
-pub struct RegisterOperand {}
+mod operand {
+    pub trait OperandType {}
+    pub struct UnknownOperand {}
+    pub struct ImmediateOperand {}
+    pub struct RegisterOperand {}
 
-impl OperandType for UnknownOperand {}
-impl OperandType for ImmediateOperand {}
-impl OperandType for RegisterOperand {}
+    impl OperandType for UnknownOperand {}
+    impl OperandType for ImmediateOperand {}
+    impl OperandType for RegisterOperand {}
+}
 
 mod udf {
     use super::*;
 
-    /// Aarch64 `udf` asm instruction. Causes an exception if executed
+    /// Aarch64 `udf` asm instruction.
+    ///
+    /// Causes an exception if executed
     /// ```
     ///     use apple_one_jit::arm_asm::Udf;
     ///     let opcode = Udf::new().generate();
@@ -94,8 +97,10 @@ pub use udf::Udf;
 mod ret {
     use super::*;
 
-    /// Aarch64 `ret` asm instruction. Returns execution to the caller, replacing the program
-    /// counter by the value in the selected register (X30, also known as LR, by default)
+    /// Aarch64 `ret` asm instruction.
+    ///
+    /// Returns execution to the caller, replacing the program counter by the value in the
+    /// selected register (X30, also known as LR, by default)
     pub struct Ret(Register);
 
     impl Ret {
@@ -171,7 +176,7 @@ mod branch {
 
 pub use branch::Branch;
 
-pub mod arithmetic {
+mod arithmetic {
     use super::*;
     use std::marker::PhantomData;
 
@@ -228,7 +233,7 @@ pub mod arithmetic {
     }
 
     /// Aarch64 asm arithmetic instructions.
-    pub struct ArithmeticOp<const OP: u8, T: OperandType> {
+    pub struct ArithmeticOp<const OP: u8, T: operand::OperandType> {
         source_reg: Register,
         dest_reg: Register,
         update_flags: bool,
@@ -237,7 +242,7 @@ pub mod arithmetic {
         _pd: PhantomData<T>,
     }
 
-    impl<const OP: u8, T: OperandType> ArithmeticOp<OP, T> {
+    impl<const OP: u8, T: operand::OperandType> ArithmeticOp<OP, T> {
         /// Updates the flags after the operation
         pub fn update_flags(mut self) -> Self {
             self.update_flags = true;
@@ -245,7 +250,7 @@ pub mod arithmetic {
         }
     }
 
-    impl<const OP: u8> ArithmeticOp<OP, UnknownOperand> {
+    impl<const OP: u8> ArithmeticOp<OP, operand::UnknownOperand> {
         /// Constructs the arithmetic operation
         pub fn new(dest_reg: Register, source_reg: Register) -> Self {
             Self {
@@ -259,8 +264,8 @@ pub mod arithmetic {
         }
 
         /// Selects the immediate operation type
-        pub fn with_immediate(self, imm: Immediate) -> ArithmeticOp<OP, ImmediateOperand> {
-            ArithmeticOp::<OP, ImmediateOperand> {
+        pub fn with_immediate(self, imm: Immediate) -> ArithmeticOp<OP, operand::ImmediateOperand> {
+            ArithmeticOp::<OP, operand::ImmediateOperand> {
                 source_reg: self.source_reg,
                 dest_reg: self.dest_reg,
                 update_flags: self.update_flags,
@@ -274,8 +279,8 @@ pub mod arithmetic {
         }
 
         /// Selects the shifted register operation type
-        pub fn with_shifted_reg(self, reg: Register) -> ArithmeticOp<OP, RegisterOperand> {
-            ArithmeticOp::<OP, RegisterOperand> {
+        pub fn with_shifted_reg(self, reg: Register) -> ArithmeticOp<OP, operand::RegisterOperand> {
+            ArithmeticOp::<OP, operand::RegisterOperand> {
                 source_reg: self.source_reg,
                 dest_reg: self.dest_reg,
                 update_flags: self.update_flags,
@@ -289,7 +294,7 @@ pub mod arithmetic {
         }
     }
 
-    impl<const OP: u8> ArithmeticOp<OP, ImmediateOperand> {
+    impl<const OP: u8> ArithmeticOp<OP, operand::ImmediateOperand> {
         /// Shifts the immediate another 12 bits.
         pub fn shifted(mut self) -> Self {
             self.immediate.as_mut().unwrap().shift = true;
@@ -314,7 +319,7 @@ pub mod arithmetic {
         }
     }
 
-    impl<const OP: u8> ArithmeticOp<OP, RegisterOperand> {
+    impl<const OP: u8> ArithmeticOp<OP, operand::RegisterOperand> {
         /// Shifts the second register operand before performing the arithmetic operation
         pub fn with_shift(mut self, reg_shift: RegShift) -> Self {
             self.register.as_mut().unwrap().reg_shift.replace(reg_shift);
@@ -344,7 +349,7 @@ pub mod arithmetic {
         }
     }
 
-    /// An arithmetic Add instruction for Aarch64
+    /// An arithmetic `add` instruction for Aarch64
     /// ```
     ///     use apple_one_jit::arm_asm::{Register, Add, RegShift};
     ///     let opcode = Add::new(
@@ -353,9 +358,9 @@ pub mod arithmetic {
     ///         )
     ///         .with_shifted_reg(Register::X30).with_shift(RegShift::Lsl(2)).generate();
     /// ```
-    pub type Add = ArithmeticOp<{ Operation::Add as u8 }, UnknownOperand>;
+    pub type Add = ArithmeticOp<{ Operation::Add as u8 }, operand::UnknownOperand>;
 
-    /// An arithmetic Sub instruction for Aarch64
+    /// An arithmetic `sub` instruction for Aarch64
     /// ```
     ///     use apple_one_jit::arm_asm::{Register, Sub, RegShift};
     ///     let opcode = Sub::new(
@@ -364,10 +369,12 @@ pub mod arithmetic {
     ///         )
     ///         .with_shifted_reg(Register::X30).with_shift(RegShift::Asr(3)).generate();
     /// ```
-    pub type Sub = ArithmeticOp<{ Operation::Sub as u8 }, UnknownOperand>;
+    pub type Sub = ArithmeticOp<{ Operation::Sub as u8 }, operand::UnknownOperand>;
 }
 
-pub use arithmetic::{Add, RegShift, Sub};
+pub use arithmetic::Add;
+pub use arithmetic::RegShift;
+pub use arithmetic::Sub;
 
 mod logical_op {
     use super::*;
@@ -380,7 +387,7 @@ mod logical_op {
         Xor = 2,
     }
 
-    pub struct LogicalOperation<const OP: u8, ArgumentType: OperandType> {
+    pub struct LogicalOperation<const OP: u8, ArgumentType: operand::OperandType> {
         source_reg: Register,
         dest_reg: Register,
         immediate: Option<Immediate>,
@@ -388,7 +395,7 @@ mod logical_op {
     }
 
     /// Creates a logical operation with the given intermediate as the second argument
-    impl<const OP: u8> LogicalOperation<OP, UnknownOperand> {
+    impl<const OP: u8> LogicalOperation<OP, operand::UnknownOperand> {
         pub fn new(dest_reg: Register, source_reg: Register) -> Self {
             Self {
                 dest_reg,
@@ -399,8 +406,11 @@ mod logical_op {
         }
 
         /// Creates a logical operation with the given intermediate as the second argument
-        pub fn with_immediate(self, imm: Immediate) -> LogicalOperation<OP, ImmediateOperand> {
-            LogicalOperation::<OP, ImmediateOperand> {
+        pub fn with_immediate(
+            self,
+            imm: Immediate,
+        ) -> LogicalOperation<OP, operand::ImmediateOperand> {
+            LogicalOperation::<OP, operand::ImmediateOperand> {
                 source_reg: self.source_reg,
                 dest_reg: self.dest_reg,
                 immediate: Some(imm),
@@ -417,7 +427,7 @@ mod logical_op {
         (value != 0) && (is_mask(value | (value - 1)))
     }
 
-    impl<const OP: u8> LogicalOperation<OP, ImmediateOperand> {
+    impl<const OP: u8> LogicalOperation<OP, operand::ImmediateOperand> {
         fn encode_immediate(&self) -> (u32, u32, u32) {
             let immediate: u64 = self
                 .immediate
@@ -487,7 +497,7 @@ mod logical_op {
         }
     }
 
-    /// A logical `OR` operation
+    /// A logical `or` operation for Aarch64
     /// ```
     ///     use apple_one_jit::arm_asm::{Register, Or, Immediate};
     ///     let opcode = Or::new(
@@ -496,9 +506,9 @@ mod logical_op {
     ///         )
     ///         .with_immediate(Immediate::new(0xaaaaaaaaaaaaaaaa)).generate();
     /// ```
-    pub type Or = LogicalOperation<{ Operation::Or as u8 }, UnknownOperand>;
+    pub type Or = LogicalOperation<{ Operation::Or as u8 }, operand::UnknownOperand>;
 
-    /// A logical `AND` operation
+    /// A logical `and` operation for Aarch64
     /// ```
     ///     use apple_one_jit::arm_asm::{Register, And, Immediate};
     ///     let opcode = And::new(
@@ -507,9 +517,9 @@ mod logical_op {
     ///         )
     ///         .with_immediate(Immediate::new(0xaaaaaaaaaaaaaaaa)).generate();
     /// ```
-    pub type And = LogicalOperation<{ Operation::And as u8 }, UnknownOperand>;
+    pub type And = LogicalOperation<{ Operation::And as u8 }, operand::UnknownOperand>;
 
-    /// A logical `XOR` operation
+    /// A logical `xor` operation for Aarch64
     /// ```
     ///     use apple_one_jit::arm_asm::{Register, Xor, Immediate};
     ///     let opcode = Xor::new(
@@ -518,7 +528,7 @@ mod logical_op {
     ///         )
     ///         .with_immediate(Immediate::new(0xaaaaaaaaaaaaaaaa)).generate();
     /// ```
-    pub type Xor = LogicalOperation<{ Operation::Xor as u8 }, UnknownOperand>;
+    pub type Xor = LogicalOperation<{ Operation::Xor as u8 }, operand::UnknownOperand>;
 }
 
 pub use logical_op::And;
