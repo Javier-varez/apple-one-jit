@@ -13,9 +13,19 @@ impl OpCode {
 /// Immediate argument for a machine code instruction
 pub struct Immediate(u64);
 
+/// Signed immediate argument for a machine code instruction
+pub struct SignedImmediate(i64);
+
 impl Immediate {
     /// Constructs a new immediate from the given value
     pub fn new(val: u64) -> Self {
+        Self(val)
+    }
+}
+
+impl SignedImmediate {
+    /// Constructs a new immediate from the given value
+    pub fn new(val: i64) -> Self {
         Self(val)
     }
 }
@@ -133,43 +143,78 @@ pub use ret::Ret;
 
 mod branch {
     use super::*;
+    use std::marker::PhantomData;
 
-    enum BranchTarget {
-        Register(Register),
-        Immediate(Immediate),
-    }
-
-    pub struct Branch {
-        branch_target: Option<BranchTarget>,
+    /// A `branch` operation for Aarch64
+    /// ```
+    ///     use apple_one_jit::arm_asm::{Branch, SignedImmediate};
+    ///     // Jump 5 instructions before and save PC+4 in R30 (LR)
+    ///     let opcode = Branch::new()
+    ///         .with_immediate(SignedImmediate::new(-5)).link().generate();
+    /// ```
+    pub struct Branch<T: operand::OperandType> {
+        register: Option<Register>,
+        immediate: Option<SignedImmediate>,
         link: bool,
+        _pd: PhantomData<T>,
     }
 
-    impl Branch {
+    impl Branch<operand::UnknownOperand> {
         pub fn new() -> Self {
             Self {
-                branch_target: None,
+                register: None,
+                immediate: None,
                 link: false,
+                _pd: PhantomData,
             }
         }
 
-        pub fn with_register(mut self, reg: Register) -> Self {
-            self.branch_target = Some(BranchTarget::Register(reg));
-            self
+        pub fn with_register(self, reg: Register) -> Branch<operand::RegisterOperand> {
+            Branch::<operand::RegisterOperand> {
+                register: Some(reg),
+                immediate: None,
+                link: self.link,
+                _pd: PhantomData,
+            }
         }
 
-        pub fn with_immediate(mut self, imm: Immediate) -> Self {
-            self.branch_target = Some(BranchTarget::Immediate(imm));
-            self
+        pub fn with_immediate(self, imm: SignedImmediate) -> Branch<operand::ImmediateOperand> {
+            Branch::<operand::ImmediateOperand> {
+                register: None,
+                immediate: Some(imm),
+                link: self.link,
+                _pd: PhantomData,
+            }
         }
+    }
 
+    impl<T: operand::OperandType> Branch<T> {
         /// If called, stores the return address in X30 when branching
         pub fn link(mut self) -> Self {
             self.link = true;
             self
         }
+    }
 
+    impl Branch<operand::ImmediateOperand> {
         pub fn generate(self) -> OpCode {
-            unimplemented!();
+            const LINK_OFFSET: usize = 31;
+            const BASE: u32 = 0x14000000;
+            const IMM_MASK: i64 = (1 << 26) - 1;
+            let link = if self.link { 1 << LINK_OFFSET } else { 0 };
+
+            let immediate = self.immediate.unwrap().0;
+            let extra_bits = immediate & !IMM_MASK;
+            assert!((extra_bits == 0) || (extra_bits == !IMM_MASK));
+            let immediate = (immediate & IMM_MASK) as u32;
+
+            OpCode(BASE | link | immediate)
+        }
+    }
+
+    impl Branch<operand::RegisterOperand> {
+        pub fn generate(self) -> OpCode {
+            unimplemented!()
         }
     }
 }

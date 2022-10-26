@@ -129,7 +129,9 @@ pub fn run_demo() {
 #[cfg(all(test, target_arch = "aarch64"))]
 mod test {
     use super::*;
-    use crate::arm_asm::{And, MovShift, Movk, Movn, Movz, Or, RegShift, Sub, Xor};
+    use crate::arm_asm::{
+        And, Branch, MovShift, Movk, Movn, Movz, Or, RegShift, SignedImmediate, Sub, Xor,
+    };
     use region::page;
 
     #[test]
@@ -466,5 +468,36 @@ mod test {
 
         let val = unsafe { invoke!(jit_page, extern "C" fn() -> u64) };
         assert_eq!(val, 0xFFFFFFFFFFFF55AA);
+    }
+
+    #[test]
+    fn test_branch() {
+        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+
+        jit_page.populate(|opcode_stream| {
+            opcode_stream.push_opcode(
+                Movz::new(Register::X0)
+                    .with_immediate(Immediate::new(0xFFFF))
+                    .with_shift(MovShift::Bits0)
+                    .generate(),
+            );
+            // Skip 1 instruction (0 would jump to current PC, 1 to next intruction (nop) and 2
+            // skips the next instruction)
+            opcode_stream.push_opcode(
+                Branch::new()
+                    .with_immediate(SignedImmediate::new(2))
+                    .generate(),
+            );
+            opcode_stream.push_opcode(
+                Movz::new(Register::X0)
+                    .with_immediate(Immediate::new(0xAA55))
+                    .with_shift(MovShift::Bits0)
+                    .generate(),
+            );
+            opcode_stream.push_opcode(Ret::new().generate());
+        });
+
+        let val = unsafe { invoke!(jit_page, extern "C" fn() -> u64) };
+        assert_eq!(val, 0xFFFF);
     }
 }
