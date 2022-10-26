@@ -129,7 +129,7 @@ pub fn run_demo() {
 #[cfg(all(test, target_arch = "aarch64"))]
 mod test {
     use super::*;
-    use crate::arm_asm::{And, Or, RegShift, Sub, Xor};
+    use crate::arm_asm::{And, MovShift, Movk, Movn, Movz, Or, RegShift, Sub, Xor};
     use region::page;
 
     #[test]
@@ -396,5 +396,75 @@ mod test {
             )
         };
         assert_eq!(val, 0xFFAA_00AA_5500_AA55);
+    }
+
+    #[test]
+    fn test_movz() {
+        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+
+        jit_page.populate(|opcode_stream| {
+            opcode_stream.push_opcode(
+                Movz::new(Register::X0)
+                    .with_immediate(Immediate::new(0x1234))
+                    .generate(),
+            );
+            opcode_stream.push_opcode(Ret::new().generate());
+        });
+
+        let val = unsafe { invoke!(jit_page, extern "C" fn() -> u64) };
+        assert_eq!(val, 0x1234);
+    }
+
+    #[test]
+    fn test_movk() {
+        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+
+        jit_page.populate(|opcode_stream| {
+            opcode_stream.push_opcode(
+                Movz::new(Register::X0)
+                    .with_immediate(Immediate::new(0x1234))
+                    .generate(),
+            );
+            opcode_stream.push_opcode(
+                Movk::new(Register::X0)
+                    .with_immediate(Immediate::new(0x5678))
+                    .with_shift(MovShift::Bits16)
+                    .generate(),
+            );
+            opcode_stream.push_opcode(
+                Movk::new(Register::X0)
+                    .with_immediate(Immediate::new(0xFFFF))
+                    .with_shift(MovShift::Bits32)
+                    .generate(),
+            );
+            opcode_stream.push_opcode(
+                Movk::new(Register::X0)
+                    .with_immediate(Immediate::new(0x55AA))
+                    .with_shift(MovShift::Bits48)
+                    .generate(),
+            );
+            opcode_stream.push_opcode(Ret::new().generate());
+        });
+
+        let val = unsafe { invoke!(jit_page, extern "C" fn() -> u64) };
+        assert_eq!(val, 0x55AAFFFF56781234);
+    }
+
+    #[test]
+    fn test_movn() {
+        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+
+        jit_page.populate(|opcode_stream| {
+            opcode_stream.push_opcode(
+                Movn::new(Register::X0)
+                    .with_immediate(Immediate::new(0xAA55))
+                    .with_shift(MovShift::Bits0)
+                    .generate(),
+            );
+            opcode_stream.push_opcode(Ret::new().generate());
+        });
+
+        let val = unsafe { invoke!(jit_page, extern "C" fn() -> u64) };
+        assert_eq!(val, 0xFFFFFFFFFFFF55AA);
     }
 }

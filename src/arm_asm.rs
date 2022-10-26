@@ -590,3 +590,110 @@ mod logical_op {
 pub use logical_op::And;
 pub use logical_op::Or;
 pub use logical_op::Xor;
+
+mod mov {
+    use super::*;
+    use std::marker::PhantomData;
+
+    #[repr(u8)]
+    enum Operation {
+        MOVN = 0,
+        MOVZ = 2,
+        MOVK = 3,
+    }
+
+    #[repr(u32)]
+    pub enum MovShift {
+        Bits0 = 0,
+        Bits16 = 1,
+        Bits32 = 2,
+        Bits48 = 3,
+    }
+
+    pub struct MovOperation<const OP: u8, ArgumentType: operand::OperandType> {
+        dest_reg: Register,
+        immediate: Option<Immediate>,
+        shift: MovShift,
+        _pd: PhantomData<ArgumentType>,
+    }
+
+    impl<const OP: u8> MovOperation<OP, operand::UnknownOperand> {
+        /// Creates a mov operation targeting the given register
+        pub fn new(dest_reg: Register) -> Self {
+            Self {
+                dest_reg,
+                immediate: None,
+                shift: MovShift::Bits0,
+                _pd: PhantomData {},
+            }
+        }
+
+        /// Creates a mov operation with the given intermediate as the second operand
+        pub fn with_immediate(self, imm: Immediate) -> MovOperation<OP, operand::ImmediateOperand> {
+            MovOperation::<OP, operand::ImmediateOperand> {
+                dest_reg: self.dest_reg,
+                immediate: Some(imm),
+                shift: MovShift::Bits0,
+                _pd: PhantomData {},
+            }
+        }
+    }
+
+    impl<const OP: u8> MovOperation<OP, operand::ImmediateOperand> {
+        pub fn with_shift(mut self, shift: MovShift) -> Self {
+            self.shift = shift;
+            self
+        }
+        pub fn generate(self) -> OpCode {
+            const OPCODE_BASE: u32 = 0x92800000;
+            const IMM_OFFSET: usize = 5;
+            const IMM_MASK: u32 = 0xFFFF;
+            const DST_REG_OFFSET: usize = 0;
+
+            if (self.immediate.as_ref().unwrap().0 & !(IMM_MASK as u64)) != 0 {
+                panic!("Invalid immediate operand for mov operation. Must be 16-bit maximum");
+            }
+
+            let dest_reg = (self.dest_reg as u32) << DST_REG_OFFSET;
+            let shift = (self.shift as u32) << 21;
+            let imm = ((self.immediate.unwrap().0 as u32) & IMM_MASK) << IMM_OFFSET;
+            let ty = (OP as u32) << 29;
+            OpCode(OPCODE_BASE | dest_reg | shift | imm | ty)
+        }
+    }
+
+    /// A `movz` operation for Aarch64
+    /// ```
+    ///     use apple_one_jit::arm_asm::{Register, Movz, MovShift, Immediate};
+    ///     let opcode = Movz::new(
+    ///             Register::X0,
+    ///         )
+    ///         .with_immediate(Immediate::new(0xAAAA)).with_shift(MovShift::Bits16).generate();
+    /// ```
+    pub type Movz = MovOperation<{ Operation::MOVZ as u8 }, operand::UnknownOperand>;
+
+    /// A `movk` operation for Aarch64
+    /// ```
+    ///     use apple_one_jit::arm_asm::{Register, Movk, MovShift, Immediate};
+    ///     let opcode = Movk::new(
+    ///             Register::X0,
+    ///         )
+    ///         .with_immediate(Immediate::new(0xAAAA)).with_shift(MovShift::Bits16).generate();
+    /// ```
+    pub type Movk = MovOperation<{ Operation::MOVK as u8 }, operand::UnknownOperand>;
+
+    /// A `movn` operation for Aarch64
+    /// ```
+    ///     use apple_one_jit::arm_asm::{Register, Movn, MovShift, Immediate};
+    ///     let opcode = Movn::new(
+    ///             Register::X0,
+    ///         )
+    ///         .with_immediate(Immediate::new(0xAAAA)).with_shift(MovShift::Bits16).generate();
+    /// ```
+    pub type Movn = MovOperation<{ Operation::MOVN as u8 }, operand::UnknownOperand>;
+}
+
+pub use mov::MovShift;
+pub use mov::Movk;
+pub use mov::Movn;
+pub use mov::Movz;
