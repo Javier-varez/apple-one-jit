@@ -5,6 +5,11 @@ use region::{alloc, page, protect, Allocation, Protection};
 
 use libc::{sigaction, SIGILL};
 
+#[derive(Clone)]
+pub struct Marker {
+    index: isize,
+}
+
 pub struct OpCodeStream<'a> {
     data: &'a mut [MaybeUninit<OpCode>],
     index: usize,
@@ -18,17 +23,29 @@ impl<'a> OpCodeStream<'a> {
         Self { data, index: 0 }
     }
 
-    pub fn push_opcode(&mut self, opcode: OpCode) -> usize {
-        let idx = self.index;
-        self.data[idx].write(opcode);
-        self.index = idx + 1;
-        idx
+    pub fn push_opcode(&mut self, opcode: OpCode) -> Marker {
+        let index = self.index;
+        self.data[index].write(opcode);
+        self.index = index + 1;
+        Marker {
+            index: index as isize,
+        }
     }
 
-    pub fn add_marker(&mut self) -> usize {
-        let marker = self.index;
+    pub fn add_marker(&mut self) -> Marker {
+        let index = self.index;
         self.push_opcode(Udf::new().generate());
-        marker
+        Marker {
+            index: index as isize,
+        }
+    }
+
+    pub fn relative_distance(&self, marker_a: &Marker, marker_b: &Marker) -> isize {
+        marker_a.index - marker_b.index
+    }
+
+    pub fn marker_address(&self, marker: &Marker) -> *const () {
+        &self.data[marker.index as usize] as *const _ as *const _
     }
 }
 
@@ -55,6 +72,11 @@ impl<'a> JitPage<'a> {
         callable(&mut self.opcode_stream);
     }
 
+    /// Maps the pages as READ_EXECUTE and then runs the callable, passing a pointer to the
+    /// beginning of the page.
+    ///
+    /// # Safety
+    /// The user must guarantee that the region contains valid code at this point
     pub unsafe fn run<U, T: Fn(*const ()) -> U>(&mut self, callable: T) -> U {
         protect(
             self.allocation.as_mut_ptr::<()>(),

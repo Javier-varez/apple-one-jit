@@ -87,12 +87,13 @@ mod udf {
     ///     use apple_one_jit::arm_asm::Udf;
     ///     let opcode = Udf::new().generate();
     /// ```
+    #[derive(Default)]
     pub struct Udf();
 
     impl Udf {
         /// Constructs a new Udf instruction
         pub fn new() -> Self {
-            Self()
+            <Self as Default>::default()
         }
 
         /// Generates the opcode for the instruction
@@ -113,6 +114,12 @@ mod ret {
     /// selected register (X30, also known as LR, by default)
     pub struct Ret(Register);
 
+    impl Default for Ret {
+        fn default() -> Self {
+            Self(Register::X30)
+        }
+    }
+
     impl Ret {
         /// Constructs a new Ret instruction
         /// ```
@@ -120,7 +127,7 @@ mod ret {
         ///     let opcode = Ret::new().with_register(Register::X30).generate();
         /// ```
         pub fn new() -> Self {
-            Self(Register::X30)
+            <Self as Default>::default()
         }
 
         /// Sets the register to use for the ret instruction
@@ -159,8 +166,8 @@ mod branch {
         _pd: PhantomData<T>,
     }
 
-    impl Branch<operand::UnknownOperand> {
-        pub fn new() -> Self {
+    impl Default for Branch<operand::UnknownOperand> {
+        fn default() -> Self {
             Self {
                 register: None,
                 immediate: None,
@@ -168,7 +175,15 @@ mod branch {
                 _pd: PhantomData,
             }
         }
+    }
 
+    impl Branch<operand::UnknownOperand> {
+        /// Constructs a new Branch instruction
+        pub fn new() -> Self {
+            <Self as Default>::default()
+        }
+
+        /// Branchs to the address in the given register (absolute jump)
         pub fn with_register(self, reg: Register) -> Branch<operand::RegisterOperand> {
             Branch::<operand::RegisterOperand> {
                 register: Some(reg),
@@ -178,6 +193,7 @@ mod branch {
             }
         }
 
+        /// Relative branch to the PC, offset by the value of the immediate
         pub fn with_immediate(self, imm: SignedImmediate) -> Branch<operand::ImmediateOperand> {
             Branch::<operand::ImmediateOperand> {
                 register: None,
@@ -197,6 +213,7 @@ mod branch {
     }
 
     impl Branch<operand::ImmediateOperand> {
+        /// Builds the OpCode for the instruction
         pub fn generate(self) -> OpCode {
             const LINK_OFFSET: usize = 31;
             const BASE: u32 = 0x14000000;
@@ -213,6 +230,7 @@ mod branch {
     }
 
     impl Branch<operand::RegisterOperand> {
+        /// Builds the OpCode for the instruction
         pub fn generate(self) -> OpCode {
             unimplemented!()
         }
@@ -515,7 +533,7 @@ mod logical_op {
             // Calculate the size of the immediate
             let mut size = 64;
             while size > 2 {
-                size = size / 2;
+                size /= 2;
                 let mask = (1 << size) - 1;
 
                 if (immediate & mask) != ((immediate >> size) & mask) {
@@ -642,9 +660,9 @@ mod mov {
 
     #[repr(u8)]
     enum Operation {
-        MOVN = 0,
-        MOVZ = 2,
-        MOVK = 3,
+        Movn = 0,
+        Movz = 2,
+        Movk = 3,
     }
 
     #[repr(u32)]
@@ -715,7 +733,7 @@ mod mov {
     ///         )
     ///         .with_immediate(Immediate::new(0xAAAA)).with_shift(MovShift::Bits16).generate();
     /// ```
-    pub type Movz = MovOperation<{ Operation::MOVZ as u8 }, operand::UnknownOperand>;
+    pub type Movz = MovOperation<{ Operation::Movz as u8 }, operand::UnknownOperand>;
 
     /// A `movk` operation for Aarch64
     /// ```
@@ -725,7 +743,7 @@ mod mov {
     ///         )
     ///         .with_immediate(Immediate::new(0xAAAA)).with_shift(MovShift::Bits16).generate();
     /// ```
-    pub type Movk = MovOperation<{ Operation::MOVK as u8 }, operand::UnknownOperand>;
+    pub type Movk = MovOperation<{ Operation::Movk as u8 }, operand::UnknownOperand>;
 
     /// A `movn` operation for Aarch64
     /// ```
@@ -735,7 +753,7 @@ mod mov {
     ///         )
     ///         .with_immediate(Immediate::new(0xAAAA)).with_shift(MovShift::Bits16).generate();
     /// ```
-    pub type Movn = MovOperation<{ Operation::MOVN as u8 }, operand::UnknownOperand>;
+    pub type Movn = MovOperation<{ Operation::Movn as u8 }, operand::UnknownOperand>;
 }
 
 pub use mov::MovShift;
