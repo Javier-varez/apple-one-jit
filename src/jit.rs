@@ -7,7 +7,7 @@ use libc::{sigaction, SIGILL};
 
 #[derive(Clone)]
 pub struct Marker {
-    index: isize,
+    index: i64,
 }
 
 pub struct OpCodeStream<'a> {
@@ -28,7 +28,7 @@ impl<'a> OpCodeStream<'a> {
         self.data[index].write(opcode);
         self.index = index + 1;
         Marker {
-            index: index as isize,
+            index: index as i64,
         }
     }
 
@@ -36,16 +36,20 @@ impl<'a> OpCodeStream<'a> {
         let index = self.index;
         self.push_opcode(Udf::new().generate());
         Marker {
-            index: index as isize,
+            index: index as i64,
         }
     }
 
-    pub fn relative_distance(&self, marker_a: &Marker, marker_b: &Marker) -> isize {
+    pub fn relative_distance(&self, marker_a: &Marker, marker_b: &Marker) -> i64 {
         marker_a.index - marker_b.index
     }
 
     pub fn marker_address(&self, marker: &Marker) -> *const () {
         &self.data[marker.index as usize] as *const _ as *const _
+    }
+
+    pub fn patch_opcode(&mut self, marker: &Marker, opcode: OpCode) {
+        self.data[marker.index as usize].write(opcode);
     }
 }
 
@@ -152,7 +156,7 @@ pub fn run_demo() {
 mod test {
     use super::*;
     use crate::arm_asm::{
-        And, Branch, MovShift, Movk, Movn, Movz, Or, RegShift, SignedImmediate, Sub, Xor,
+        And, Branch, Condition, MovShift, Movk, Movn, Movz, Or, RegShift, SignedImmediate, Sub, Xor,
     };
     use region::page;
 
@@ -503,23 +507,92 @@ mod test {
                     .with_shift(MovShift::Bits0)
                     .generate(),
             );
-            // Skip 1 instruction (0 would jump to current PC, 1 to next intruction (nop) and 2
-            // skips the next instruction)
-            opcode_stream.push_opcode(
-                Branch::new()
-                    .with_immediate(SignedImmediate::new(2))
-                    .generate(),
-            );
+
+            let source_marker = opcode_stream.add_marker();
             opcode_stream.push_opcode(
                 Movz::new(Register::X0)
                     .with_immediate(Immediate::new(0xAA55))
                     .with_shift(MovShift::Bits0)
                     .generate(),
             );
-            opcode_stream.push_opcode(Ret::new().generate());
+            let target_marker = opcode_stream.push_opcode(Ret::new().generate());
+
+            opcode_stream.patch_opcode(
+                &source_marker,
+                Branch::new()
+                    .with_immediate(SignedImmediate::new(
+                        opcode_stream.relative_distance(&target_marker, &source_marker),
+                    ))
+                    .generate(),
+            );
         });
 
         let val = unsafe { invoke!(jit_page, extern "C" fn() -> u64) };
         assert_eq!(val, 0xFFFF);
+    }
+
+    #[test]
+    fn test_conditional_branch() {
+        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+
+        jit_page.populate(|opcode_stream| {
+            opcode_stream.push_opcode(
+                Add::new(Register::X2, Register::X0)
+                    .with_immediate(Immediate::new(0))
+                    .generate(),
+            );
+            opcode_stream.push_opcode(
+                Movz::new(Register::X0)
+                    .with_immediate(Immediate::new(0))
+                    .generate(),
+            );
+
+            // Check condition
+            opcode_stream.push_opcode(
+                Add::new(Register::X1, Register::X1)
+                    .with_immediate(Immediate::new(0))
+                    .update_flags()
+                    .generate(),
+            );
+            let branch_forward_marker = opcode_stream.add_marker();
+
+            opcode_stream.push_opcode(
+                Add::new(Register::X0, Register::X0)
+                    .with_shifted_reg(Register::X2)
+                    .generate(),
+            );
+            opcode_stream.push_opcode(
+                Sub::new(Register::X1, Register::X1)
+                    .with_immediate(Immediate::new(1))
+                    .update_flags()
+                    .generate(),
+            );
+            let branch_back_marker = opcode_stream.add_marker();
+            let offset =
+                opcode_stream.relative_distance(&branch_forward_marker, &branch_back_marker);
+            opcode_stream.patch_opcode(
+                &branch_back_marker,
+                Branch::new()
+                    .with_immediate(SignedImmediate::new(offset))
+                    .generate(),
+            );
+
+            // Patching opcode
+            let target_jump = opcode_stream.push_opcode(Ret::new().generate());
+            let offset = opcode_stream.relative_distance(&target_jump, &branch_forward_marker);
+            opcode_stream.patch_opcode(
+                &branch_forward_marker,
+                Branch::new()
+                    .with_immediate(SignedImmediate::new(offset))
+                    .iff(Condition::Eq)
+                    .generate(),
+            );
+        });
+
+        let val = unsafe { invoke!(jit_page, extern "C" fn(u64, u64) -> u64, 4, 4) };
+        assert_eq!(val, 16);
+
+        let val = unsafe { invoke!(jit_page, extern "C" fn(u64, u64) -> u64, 128, 128) };
+        assert_eq!(val, 16384);
     }
 }

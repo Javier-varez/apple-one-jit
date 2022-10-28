@@ -152,6 +152,40 @@ mod branch {
     use super::*;
     use std::marker::PhantomData;
 
+    /// Branch conditions
+    pub enum Condition {
+        /// Equal: Z flag set
+        Eq = 0,
+        /// Not equal: Z flag clear
+        Ne = 1,
+        /// Unsigned higher or same: C flag set
+        Cs = 2,
+        /// Unsigned lower: C flag clear
+        Cc = 3,
+        /// Negative: N flag set
+        Mi = 4,
+        /// Positive or zero: N flag clear
+        Pl = 5,
+        /// Overflow: V flag set
+        Vs = 6,
+        /// No overflow: V flag clear
+        Vc = 7,
+        /// Unsigned higher: C set and Z clear
+        Hi = 8,
+        /// Unsigned lower or same: C clear or Z set
+        Ls = 9,
+        /// Greater or equal: N equals V
+        Ge = 10,
+        /// Less than: N not equal to V
+        Lt = 11,
+        /// Greater than: Z clear and (N equals V)
+        Gt = 12,
+        /// Less or equal: Z set or (N not equal to V)
+        Le = 13,
+        /// Always
+        Al = 14,
+    }
+
     /// A `branch` operation for Aarch64
     /// ```
     ///     use apple_one_jit::arm_asm::{Branch, SignedImmediate};
@@ -159,52 +193,50 @@ mod branch {
     ///     let opcode = Branch::new()
     ///         .with_immediate(SignedImmediate::new(-5)).link().generate();
     /// ```
-    pub struct Branch<T: operand::OperandType> {
-        register: Option<Register>,
+    pub struct Branch<T: operand::OperandType, const COND: bool> {
         immediate: Option<SignedImmediate>,
+        condition: Option<Condition>,
         link: bool,
         _pd: PhantomData<T>,
     }
 
-    impl Default for Branch<operand::UnknownOperand> {
+    impl Default for Branch<operand::UnknownOperand, false> {
         fn default() -> Self {
             Self {
-                register: None,
                 immediate: None,
+                condition: None,
                 link: false,
                 _pd: PhantomData,
             }
         }
     }
 
-    impl Branch<operand::UnknownOperand> {
+    impl Branch<operand::UnknownOperand, false> {
         /// Constructs a new Branch instruction
         pub fn new() -> Self {
             <Self as Default>::default()
         }
 
         /// Branchs to the address in the given register (absolute jump)
-        pub fn with_register(self, reg: Register) -> Branch<operand::RegisterOperand> {
-            Branch::<operand::RegisterOperand> {
-                register: Some(reg),
-                immediate: None,
-                link: self.link,
-                _pd: PhantomData,
-            }
+        pub fn with_register(self, _reg: Register) -> Branch<operand::RegisterOperand, false> {
+            unimplemented!()
         }
 
         /// Relative branch to the PC, offset by the value of the immediate
-        pub fn with_immediate(self, imm: SignedImmediate) -> Branch<operand::ImmediateOperand> {
-            Branch::<operand::ImmediateOperand> {
-                register: None,
+        pub fn with_immediate(
+            self,
+            imm: SignedImmediate,
+        ) -> Branch<operand::ImmediateOperand, false> {
+            Branch::<operand::ImmediateOperand, false> {
                 immediate: Some(imm),
+                condition: None,
                 link: self.link,
                 _pd: PhantomData,
             }
         }
     }
 
-    impl<T: operand::OperandType> Branch<T> {
+    impl<T: operand::OperandType, const COND: bool> Branch<T, COND> {
         /// If called, stores the return address in X30 when branching
         pub fn link(mut self) -> Self {
             self.link = true;
@@ -212,7 +244,17 @@ mod branch {
         }
     }
 
-    impl Branch<operand::ImmediateOperand> {
+    impl Branch<operand::ImmediateOperand, false> {
+        /// execute the branch if and only if the condition is met
+        pub fn iff(self, condition: Condition) -> Branch<operand::ImmediateOperand, true> {
+            Branch::<operand::ImmediateOperand, true> {
+                immediate: self.immediate,
+                condition: Some(condition),
+                link: self.link,
+                _pd: PhantomData,
+            }
+        }
+
         /// Builds the OpCode for the instruction
         pub fn generate(self) -> OpCode {
             const LINK_OFFSET: usize = 31;
@@ -229,7 +271,23 @@ mod branch {
         }
     }
 
-    impl Branch<operand::RegisterOperand> {
+    impl Branch<operand::ImmediateOperand, true> {
+        /// Builds the OpCode for the instruction
+        pub fn generate(self) -> OpCode {
+            const BASE: u32 = 0x54000000;
+            const IMM_MASK: i64 = (1 << 19) - 1;
+            const IMM_OFFSET: usize = 5;
+
+            let immediate = self.immediate.unwrap().0;
+            let extra_bits = immediate & !IMM_MASK;
+            assert!((extra_bits == 0) || (extra_bits == !IMM_MASK));
+            let immediate = ((immediate & IMM_MASK) as u32) << IMM_OFFSET;
+
+            OpCode(BASE | immediate | (self.condition.unwrap() as u32))
+        }
+    }
+
+    impl<const COND: bool> Branch<operand::RegisterOperand, COND> {
         /// Builds the OpCode for the instruction
         pub fn generate(self) -> OpCode {
             unimplemented!()
@@ -237,7 +295,7 @@ mod branch {
     }
 }
 
-pub use branch::Branch;
+pub use branch::{Branch, Condition};
 
 /// Register shift type
 pub enum RegShift {
@@ -268,10 +326,10 @@ impl RegShift {
         const SHIFT_TYPE_OFFSET: usize = 22;
         const SHIFT_VALUE_OFFSET: usize = 10;
         let shift_type = match self {
-            RegShift::Lsl(_) => (0 << SHIFT_TYPE_OFFSET),
-            RegShift::Lsr(_) => (1 << SHIFT_TYPE_OFFSET),
-            RegShift::Asr(_) => (2 << SHIFT_TYPE_OFFSET),
-            RegShift::Ror(_) => (3 << SHIFT_TYPE_OFFSET),
+            RegShift::Lsl(_) => 0 << SHIFT_TYPE_OFFSET,
+            RegShift::Lsr(_) => 1 << SHIFT_TYPE_OFFSET,
+            RegShift::Asr(_) => 2 << SHIFT_TYPE_OFFSET,
+            RegShift::Ror(_) => 3 << SHIFT_TYPE_OFFSET,
         };
         let shift_value = self.validate();
 
