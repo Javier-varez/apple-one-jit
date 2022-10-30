@@ -217,7 +217,7 @@ mod branch {
             <Self as Default>::default()
         }
 
-        /// Branchs to the address in the given register (absolute jump)
+        /// Branches to the address in the given register (absolute jump)
         pub fn with_register(self, _reg: Register) -> Branch<operand::RegisterOperand, false> {
             unimplemented!()
         }

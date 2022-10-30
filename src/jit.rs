@@ -53,27 +53,22 @@ impl<'a> OpCodeStream<'a> {
     }
 }
 
-pub struct JitPage<'a> {
+pub struct JitPage {
     allocation: Allocation,
-    opcode_stream: OpCodeStream<'a>,
 }
 
-impl<'a> JitPage<'a> {
+impl JitPage {
     pub fn allocate(size: usize) -> Result<Self, region::Error> {
         let mut allocation = alloc(size, Protection::READ_WRITE)?;
-
-        let ptr = allocation.as_mut_ptr::<MaybeUninit<OpCode>>();
-        let size = allocation.len() / std::mem::size_of::<MaybeUninit<OpCode>>();
-        let slice = unsafe { std::slice::from_raw_parts_mut(ptr, size) };
-
-        Ok(Self {
-            allocation,
-            opcode_stream: OpCodeStream::new(slice),
-        })
+        Ok(Self { allocation })
     }
 
     pub fn populate<T: Fn(&mut OpCodeStream)>(&mut self, callable: T) {
-        callable(&mut self.opcode_stream);
+        let ptr = self.allocation.as_mut_ptr::<MaybeUninit<OpCode>>();
+        let size = self.allocation.len() / std::mem::size_of::<MaybeUninit<OpCode>>();
+        let slice = unsafe { std::slice::from_raw_parts_mut(ptr, size) };
+        let mut opcode_stream = OpCodeStream::new(slice);
+        callable(&mut opcode_stream);
     }
 
     /// Maps the pages as READ_EXECUTE and then runs the callable, passing a pointer to the
