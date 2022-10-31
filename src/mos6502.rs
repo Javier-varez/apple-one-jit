@@ -1,6 +1,6 @@
-mod addressing_modes;
-mod instructions;
-mod opcode;
+pub mod addressing_modes;
+pub mod instructions;
+pub mod opcode;
 
 #[derive(Debug)]
 pub enum Error {
@@ -9,8 +9,8 @@ pub enum Error {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Instruction {
-    opcode: opcode::OpCode,
-    operand: addressing_modes::Operand,
+    pub opcode: opcode::OpCode,
+    pub operand: addressing_modes::Operand,
 }
 
 enum State {

@@ -38,7 +38,7 @@ impl AddressingMode {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Operand {
     U16(u16),
     U8(u8),
