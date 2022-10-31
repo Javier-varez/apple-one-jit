@@ -63,7 +63,7 @@ pub enum Register {
     X28 = 28,
     X29 = 29,
     X30 = 30,
-    SP = 31,
+    SpZr = 31,
 }
 
 mod operand {
@@ -783,6 +783,27 @@ mod mov {
         }
     }
 
+    pub struct MovRegister {
+        dest_reg: Register,
+        source_reg: Register,
+    }
+
+    impl MovRegister {
+        /// Creates a mov operation targeting the given register
+        pub fn new(dest_reg: Register, source_reg: Register) -> Self {
+            Self {
+                dest_reg,
+                source_reg,
+            }
+        }
+
+        pub fn generate(self) -> OpCode {
+            super::logical_op::Or::new(self.dest_reg, self.source_reg)
+                .with_shifted_reg(Register::SpZr)
+                .generate()
+        }
+    }
+
     /// A `movz` operation for Aarch64
     /// ```
     ///     use apple_one_jit::arm_asm::{Register, Movz, MovShift, Immediate};
@@ -812,8 +833,11 @@ mod mov {
     ///         .with_immediate(Immediate::new(0xAAAA)).with_shift(MovShift::Bits16).generate();
     /// ```
     pub type Movn = MovOperation<{ Operation::Movn as u8 }, operand::UnknownOperand>;
+
+    pub type Mov = MovRegister;
 }
 
+pub use mov::Mov;
 pub use mov::MovShift;
 pub use mov::Movk;
 pub use mov::Movn;

@@ -59,16 +59,16 @@ pub struct JitPage {
 
 impl JitPage {
     pub fn allocate(size: usize) -> Result<Self, region::Error> {
-        let mut allocation = alloc(size, Protection::READ_WRITE)?;
+        let allocation = alloc(size, Protection::READ_WRITE)?;
         Ok(Self { allocation })
     }
 
-    pub fn populate<T: Fn(&mut OpCodeStream)>(&mut self, callable: T) {
+    pub fn populate<U, T: FnMut(&mut OpCodeStream) -> U>(&mut self, mut callable: T) -> U {
         let ptr = self.allocation.as_mut_ptr::<MaybeUninit<OpCode>>();
         let size = self.allocation.len() / std::mem::size_of::<MaybeUninit<OpCode>>();
         let slice = unsafe { std::slice::from_raw_parts_mut(ptr, size) };
         let mut opcode_stream = OpCodeStream::new(slice);
-        callable(&mut opcode_stream);
+        callable(&mut opcode_stream)
     }
 
     /// Maps the pages as READ_EXECUTE and then runs the callable, passing a pointer to the
@@ -151,7 +151,8 @@ pub fn run_demo() {
 mod test {
     use super::*;
     use crate::arm_asm::{
-        And, Branch, Condition, MovShift, Movk, Movn, Movz, Or, RegShift, SignedImmediate, Sub, Xor,
+        And, Branch, Condition, Mov, MovShift, Movk, Movn, Movz, Or, RegShift, SignedImmediate,
+        Sub, Xor,
     };
     use region::page;
 
@@ -489,6 +490,19 @@ mod test {
 
         let val = unsafe { invoke!(jit_page, extern "C" fn() -> u64) };
         assert_eq!(val, 0xFFFFFFFFFFFF55AA);
+    }
+
+    #[test]
+    fn test_mov_register() {
+        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+
+        jit_page.populate(|opcode_stream| {
+            opcode_stream.push_opcode(Mov::new(Register::X0, Register::X1).generate());
+            opcode_stream.push_opcode(Ret::new().generate());
+        });
+
+        let val = unsafe { invoke!(jit_page, extern "C" fn(u64, u64) -> u64, 123, 234) };
+        assert_eq!(val, 234);
     }
 
     #[test]
