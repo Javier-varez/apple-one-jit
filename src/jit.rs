@@ -658,4 +658,61 @@ mod test {
         };
         assert_eq!(val, 0x1234_5678_9012_3456u64);
     }
+
+    #[test]
+    fn test_str_with_imm_offset_instruction() {
+        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+
+        jit_page.populate(|opcode_stream| {
+            // Store the value in X0 in [X1]
+            opcode_stream.push_opcode(
+                Strd::new(Register::X0, Register::X1)
+                    .with_mode(MemoryAccessMode::UnsignedOffsetImmediate(Immediate::new(1)))
+                    .generate(),
+            );
+            opcode_stream.push_opcode(Ret::new().generate());
+        });
+
+        let input = 0x1234_5678_9012_3456u64;
+        let mut output = [0u64; 2];
+
+        unsafe {
+            invoke!(
+                jit_page,
+                extern "C" fn(u64, *mut u64),
+                input,
+                &mut output[0] as *mut u64
+            )
+        };
+
+        assert_eq!(output[0], 0);
+        assert_eq!(output[1], input);
+    }
+
+    #[test]
+    fn test_ldr_with_imm_offset_instruction() {
+        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+
+        jit_page.populate(|opcode_stream| {
+            // Store the value in X0 in [X1]
+            opcode_stream.push_opcode(
+                Ldrd::new(Register::X0, Register::X0)
+                    .with_mode(MemoryAccessMode::UnsignedOffsetImmediate(Immediate::new(1)))
+                    .generate(),
+            );
+            opcode_stream.push_opcode(Ret::new().generate());
+        });
+
+        let input = [0u64, 0x1234_5678_9012_3456u64];
+
+        let val = unsafe {
+            invoke!(
+                jit_page,
+                extern "C" fn(*const u64) -> u64,
+                &input[0] as *const u64
+            )
+        };
+
+        assert_eq!(val, 0x1234_5678_9012_3456u64);
+    }
 }
