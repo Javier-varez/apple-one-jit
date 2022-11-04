@@ -76,7 +76,7 @@ impl JitPage {
     ///
     /// # Safety
     /// The user must guarantee that the region contains valid code at this point
-    pub unsafe fn run<U, T: Fn(*const ()) -> U>(&mut self, callable: T) -> U {
+    pub unsafe fn run<U, T: FnMut(*const ()) -> U>(&mut self, mut callable: T) -> U {
         protect(
             self.allocation.as_mut_ptr::<()>(),
             self.allocation.len(),
@@ -151,8 +151,8 @@ pub fn run_demo() {
 mod test {
     use super::*;
     use crate::arm_asm::{
-        And, Branch, Condition, Mov, MovShift, Movk, Movn, Movz, Or, RegShift, SignedImmediate,
-        Sub, Xor,
+        And, Branch, Condition, Ldrd, MemoryAccessMode, Mov, MovShift, Movk, Movn, Movz, Or,
+        RegShift, SignedImmediate, Strd, Sub, Xor,
     };
     use region::page;
 
@@ -603,5 +603,59 @@ mod test {
 
         let val = unsafe { invoke!(jit_page, extern "C" fn(u64, u64) -> u64, 128, 128) };
         assert_eq!(val, 16384);
+    }
+
+    #[test]
+    fn test_str_instruction() {
+        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+
+        jit_page.populate(|opcode_stream| {
+            // Store the value in X0 in [X1]
+            opcode_stream.push_opcode(
+                Strd::new(Register::X0, Register::X1)
+                    .with_mode(MemoryAccessMode::UnsignedOffsetImmediate(Immediate::new(0)))
+                    .generate(),
+            );
+            opcode_stream.push_opcode(Ret::new().generate());
+        });
+
+        let input = 0x1234_5678_9012_3456u64;
+        let mut output = 0u64;
+
+        unsafe {
+            invoke!(
+                jit_page,
+                extern "C" fn(u64, *mut u64),
+                input,
+                &mut output as *mut u64
+            )
+        };
+
+        assert_eq!(output, input);
+    }
+
+    #[test]
+    fn test_ldr_instruction() {
+        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+
+        jit_page.populate(|opcode_stream| {
+            // Store the address in X0 in [X0]
+            opcode_stream.push_opcode(
+                Ldrd::new(Register::X0, Register::X0)
+                    .with_mode(MemoryAccessMode::UnsignedOffsetImmediate(Immediate::new(0)))
+                    .generate(),
+            );
+            opcode_stream.push_opcode(Ret::new().generate());
+        });
+
+        let input = 0x1234_5678_9012_3456u64;
+        let val = unsafe {
+            invoke!(
+                jit_page,
+                extern "C" fn(*const u64) -> u64,
+                &input as *const u64
+            )
+        };
+        assert_eq!(val, 0x1234_5678_9012_3456u64);
     }
 }

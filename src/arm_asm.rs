@@ -21,12 +21,38 @@ impl Immediate {
     pub fn new(val: u64) -> Self {
         Self(val)
     }
+
+    fn validate(&self, num_bits: usize) -> Result<u64, ()> {
+        let mask = (1 << num_bits) - 1;
+
+        if (self.0 & !mask) == 0 {
+            Ok(self.0 & mask)
+        } else {
+            Err(())
+        }
+    }
 }
 
 impl SignedImmediate {
     /// Constructs a new immediate from the given value
     pub fn new(val: i64) -> Self {
         Self(val)
+    }
+
+    fn validate(&self, num_bits: usize) -> Result<i64, ()> {
+        let mask = (1 << num_bits) - 1;
+        let sign_bit_offset = num_bits - 1;
+        let expected_bits = if ((self.0 >> sign_bit_offset) & 1) == 1 {
+            !mask
+        } else {
+            0
+        };
+
+        if (self.0 & !mask) == expected_bits {
+            Ok(self.0 & mask)
+        } else {
+            Err(())
+        }
     }
 }
 
@@ -842,3 +868,200 @@ pub use mov::MovShift;
 pub use mov::Movk;
 pub use mov::Movn;
 pub use mov::Movz;
+
+mod memory_op {
+    use super::*;
+
+    pub enum MemoryAccessMode {
+        PostIndexImmediate(SignedImmediate),
+        PreIndexImmediate(SignedImmediate),
+        UnsignedOffsetImmediate(Immediate),
+        ShiftedRegister(Register),
+    }
+
+    impl MemoryAccessMode {
+        fn encode(&self) -> u32 {
+            match self {
+                MemoryAccessMode::PostIndexImmediate(val) => {
+                    const BASE: u32 = 0x3800_0000 | (1 << 10);
+                    const IMM_OFFSET: usize = 12;
+                    const IMM_NUM_BITS: usize = 9;
+                    let value = val.validate(IMM_NUM_BITS).unwrap() as u32;
+                    BASE | (value << IMM_OFFSET)
+                }
+                MemoryAccessMode::PreIndexImmediate(val) => {
+                    const BASE: u32 = 0x3800_0000 | (3 << 10);
+                    const IMM_OFFSET: usize = 12;
+                    const IMM_NUM_BITS: usize = 9;
+                    let value = val.validate(IMM_NUM_BITS).unwrap() as u32;
+                    BASE | (value << IMM_OFFSET)
+                }
+                MemoryAccessMode::UnsignedOffsetImmediate(val) => {
+                    const BASE: u32 = 0x3900_0000;
+                    const IMM_OFFSET: usize = 10;
+                    const IMM_NUM_BITS: usize = 12;
+                    let value = val.validate(IMM_NUM_BITS).unwrap() as u32;
+                    BASE | (value << IMM_OFFSET)
+                }
+                MemoryAccessMode::ShiftedRegister(val) => {
+                    unimplemented!()
+                }
+            }
+        }
+    }
+
+    #[repr(u8)]
+    enum AccessType {
+        Store = 0,
+        Load = 1,
+    }
+
+    #[repr(u8)]
+    enum Size {
+        Byte = 0,
+        Half = 1,
+        Word = 2,
+        DoubleWord = 3,
+    }
+
+    pub struct MemoryOp<const TYPE: u8, const OP_SIZE: u8, const HAS_MODE: bool> {
+        target_reg: Register,
+        base_reg: Register,
+        mode: Option<MemoryAccessMode>,
+    }
+
+    impl<const TYPE: u8, const OP_SIZE: u8> MemoryOp<TYPE, OP_SIZE, false> {
+        /// Creates a memory access operation targeting the given register
+        pub fn new(target_reg: Register, base_reg: Register) -> Self {
+            Self {
+                target_reg,
+                base_reg,
+                mode: None,
+            }
+        }
+
+        /// Assigns the addressing mode for the memory access.
+        pub fn with_mode(self, mode: MemoryAccessMode) -> MemoryOp<TYPE, OP_SIZE, true> {
+            MemoryOp::<TYPE, OP_SIZE, true> {
+                target_reg: self.target_reg,
+                base_reg: self.base_reg,
+                mode: Some(mode),
+            }
+        }
+    }
+
+    impl<const TYPE: u8, const OP_SIZE: u8> MemoryOp<TYPE, OP_SIZE, true> {
+        /// Generates an opcode for this instruction
+        pub fn generate(self) -> OpCode {
+            const SIZE_OFFSET: usize = 30;
+            const BASE_REG_OFFSET: usize = 5;
+            const DEST_REG_OFFSET: usize = 0;
+            const TYPE_OFFSET: usize = 22;
+            OpCode(
+                (OP_SIZE as u32) << SIZE_OFFSET
+                    | self.mode.unwrap().encode()
+                    | (self.base_reg as u32) << BASE_REG_OFFSET
+                    | (self.target_reg as u32) << DEST_REG_OFFSET
+                    | (TYPE as u32) << TYPE_OFFSET,
+            )
+        }
+    }
+
+    /// A `strb` operation for Aarch64
+    /// ```
+    ///     use apple_one_jit::arm_asm::{Register, Immediate, Strb, MemoryAccessMode};
+    ///     let opcode = Strb::new(
+    ///             Register::X0,
+    ///             Register::X1,
+    ///         )
+    ///         .with_mode(MemoryAccessMode::UnsignedOffsetImmediate(Immediate::new(1023))).generate();
+    /// ```
+    pub type Strb = MemoryOp<{ AccessType::Store as u8 }, { Size::Byte as u8 }, false>;
+
+    /// A `strh` operation for Aarch64
+    /// ```
+    ///     use apple_one_jit::arm_asm::{Register, Immediate, Strh, MemoryAccessMode};
+    ///     let opcode = Strh::new(
+    ///             Register::X0,
+    ///             Register::X1,
+    ///         )
+    ///         .with_mode(MemoryAccessMode::UnsignedOffsetImmediate(Immediate::new(1023))).generate();
+    /// ```
+    pub type Strh = MemoryOp<{ AccessType::Store as u8 }, { Size::Half as u8 }, false>;
+
+    /// A `str` operation for Aarch64 (32-bit)
+    /// ```
+    ///     use apple_one_jit::arm_asm::{Register, Immediate, Strw, MemoryAccessMode};
+    ///     let opcode = Strw::new(
+    ///             Register::X0,
+    ///             Register::X1,
+    ///         )
+    ///         .with_mode(MemoryAccessMode::UnsignedOffsetImmediate(Immediate::new(1023))).generate();
+    /// ```
+    pub type Strw = MemoryOp<{ AccessType::Store as u8 }, { Size::Word as u8 }, false>;
+
+    /// A `str` operation for Aarch64 (64-bit)
+    /// ```
+    ///     use apple_one_jit::arm_asm::{Register, Immediate, Strd, MemoryAccessMode};
+    ///     let opcode = Strd::new(
+    ///             Register::X0,
+    ///             Register::X1,
+    ///         )
+    ///         .with_mode(MemoryAccessMode::UnsignedOffsetImmediate(Immediate::new(1023))).generate();
+    /// ```
+    pub type Strd = MemoryOp<{ AccessType::Store as u8 }, { Size::DoubleWord as u8 }, false>;
+
+    /// A `ldrb` operation for Aarch64
+    /// ```
+    ///     use apple_one_jit::arm_asm::{Register, Immediate, Ldrb, MemoryAccessMode};
+    ///     let opcode = Ldrb::new(
+    ///             Register::X0,
+    ///             Register::X1,
+    ///         )
+    ///         .with_mode(MemoryAccessMode::UnsignedOffsetImmediate(Immediate::new(1023))).generate();
+    /// ```
+    pub type Ldrb = MemoryOp<{ AccessType::Load as u8 }, { Size::Byte as u8 }, false>;
+
+    /// A `ldrh` operation for Aarch64
+    /// ```
+    ///     use apple_one_jit::arm_asm::{Register, Immediate, Ldrh, MemoryAccessMode};
+    ///     let opcode = Ldrh::new(
+    ///             Register::X0,
+    ///             Register::X1,
+    ///         )
+    ///         .with_mode(MemoryAccessMode::UnsignedOffsetImmediate(Immediate::new(1023))).generate();
+    /// ```
+    pub type Ldrh = MemoryOp<{ AccessType::Load as u8 }, { Size::Half as u8 }, false>;
+
+    /// A `ldrw` operation for Aarch64 (32-bit)
+    /// ```
+    ///     use apple_one_jit::arm_asm::{Register, Immediate, Ldrw, MemoryAccessMode};
+    ///     let opcode = Ldrw::new(
+    ///             Register::X0,
+    ///             Register::X1,
+    ///         )
+    ///         .with_mode(MemoryAccessMode::UnsignedOffsetImmediate(Immediate::new(1023))).generate();
+    /// ```
+    pub type Ldrw = MemoryOp<{ AccessType::Load as u8 }, { Size::Word as u8 }, false>;
+
+    /// A `Ldrd` operation for Aarch64 (64-bit)
+    /// ```
+    ///     use apple_one_jit::arm_asm::{Register, Immediate, Ldrd, MemoryAccessMode};
+    ///     let opcode = Ldrd::new(
+    ///             Register::X0,
+    ///             Register::X1,
+    ///         )
+    ///         .with_mode(MemoryAccessMode::UnsignedOffsetImmediate(Immediate::new(1023))).generate();
+    /// ```
+    pub type Ldrd = MemoryOp<{ AccessType::Load as u8 }, { Size::DoubleWord as u8 }, false>;
+}
+
+pub use memory_op::Ldrb;
+pub use memory_op::Ldrd;
+pub use memory_op::Ldrh;
+pub use memory_op::Ldrw;
+pub use memory_op::MemoryAccessMode;
+pub use memory_op::Strb;
+pub use memory_op::Strd;
+pub use memory_op::Strh;
+pub use memory_op::Strw;
