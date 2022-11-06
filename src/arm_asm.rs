@@ -57,6 +57,7 @@ impl SignedImmediate {
 }
 
 /// Aarch64 Machine registers
+#[derive(Debug, Clone, Copy)]
 pub enum Register {
     X0 = 0,
     X1 = 1,
@@ -904,7 +905,10 @@ mod memory_op {
                     BASE | (value << IMM_OFFSET)
                 }
                 MemoryAccessMode::ShiftedRegister(val) => {
-                    unimplemented!()
+                    const BASE: u32 = 0x3800_0000 | (1 << 11) | (1 << 21) | (3 << 13);
+                    const SHIFTED_REG_OFFSET: usize = 16;
+
+                    BASE | ((*val as u32) << SHIFTED_REG_OFFSET)
                 }
             }
         }

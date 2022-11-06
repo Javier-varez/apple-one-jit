@@ -715,4 +715,85 @@ mod test {
 
         assert_eq!(val, 0x1234_5678_9012_3456u64);
     }
+
+    #[test]
+    fn test_ldr_with_register_offset_instr() {
+        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+
+        jit_page.populate(|opcode_stream| {
+            // Store the value in X0 in [X1]
+            opcode_stream.push_opcode(
+                Ldrd::new(Register::X0, Register::X0)
+                    .with_mode(MemoryAccessMode::ShiftedRegister(Register::X1))
+                    .generate(),
+            );
+            opcode_stream.push_opcode(Ret::new().generate());
+        });
+
+        let input = [123u64, 0x1234_5678_9012_3456u64];
+
+        let val = unsafe {
+            invoke!(
+                jit_page,
+                extern "C" fn(*const u64, u64) -> u64,
+                &input[0] as *const u64,
+                0
+            )
+        };
+
+        assert_eq!(val, 123);
+
+        let val = unsafe {
+            invoke!(
+                jit_page,
+                extern "C" fn(*const u64, u64) -> u64,
+                &input[0] as *const u64,
+                8
+            )
+        };
+
+        assert_eq!(val, 0x1234_5678_9012_3456u64);
+    }
+
+    #[test]
+    fn test_str_with_register_offset_instr() {
+        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+
+        jit_page.populate(|opcode_stream| {
+            // Store the value in X0 in [X1]
+            opcode_stream.push_opcode(
+                Strd::new(Register::X2, Register::X0)
+                    .with_mode(MemoryAccessMode::ShiftedRegister(Register::X1))
+                    .generate(),
+            );
+            opcode_stream.push_opcode(Ret::new().generate());
+        });
+
+        let mut output = [0u64, 0u64];
+
+        unsafe {
+            invoke!(
+                jit_page,
+                extern "C" fn(*mut u64, usize, u64),
+                &mut output[0] as *mut u64,
+                0,
+                0x1234_5678_9012_3456u64
+            )
+        };
+
+        assert_eq!(output[0], 0x1234_5678_9012_3456);
+        assert_eq!(output[1], 0);
+
+        unsafe {
+            invoke!(
+                jit_page,
+                extern "C" fn(*mut u64, usize, u64),
+                &mut output[0] as *mut u64,
+                8,
+                0x1234_5678_9012_3456u64
+            )
+        };
+        assert_eq!(output[0], 0x1234_5678_9012_3456);
+        assert_eq!(output[1], 0x1234_5678_9012_3456);
+    }
 }
