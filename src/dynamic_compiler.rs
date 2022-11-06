@@ -1,4 +1,5 @@
 use crate::arm_asm;
+use crate::arm_asm::Immediate;
 use crate::dynamic_compiler::Error::Unknown6502OpCode;
 use crate::jit::{JitPage, OpCodeStream};
 use crate::mos6502;
@@ -27,6 +28,7 @@ const Y_REGISTER: arm_asm::Register = arm_asm::Register::X2;
 const SP_REGISTER: arm_asm::Register = arm_asm::Register::X3;
 const DECODED_OP_REGISTER: arm_asm::Register = arm_asm::Register::X4;
 const MEMORY_MAP_BASE_ADDR_REGISTER: arm_asm::Register = arm_asm::Register::X5;
+const SCRATCH_REGISTER: arm_asm::Register = arm_asm::Register::X6;
 
 impl Compiler {
     /// Constructs a new dynamic re-compiler, allocating a JIT page to store the generated code
@@ -51,6 +53,7 @@ impl Compiler {
     // R3(8-bit) -> SP Register
     // R4(8/16-bit) -> Decoded operand (if any)
     // R5(64-bit) -> Base address of the 6502 memory map.
+    // R6(8/16-bit) -> Scratch register
     fn translate_code_impl(
         decoder: &mut mos6502::InstrDecoder,
         opcode_stream: &mut OpCodeStream,
@@ -79,27 +82,46 @@ impl Compiler {
                 );
             }
             mos6502::addressing_modes::AddressingMode::Absolute => {
-                // TODO(javier-varez): This cannot be implemented until ldr and str instructions are available in arm_asm
-                unimplemented!();
+                let mos6502::addressing_modes::Operand::U16(value) = operand else {
+                    panic!("Unexpected operand type {:?} for AddressingMode::Absolute", operand);
+                };
+
+                opcode_stream.push_opcode(
+                    arm_asm::Movz::new(DECODED_OP_REGISTER)
+                        .with_immediate(Immediate::new(value as u64))
+                        .generate(),
+                );
             }
             mos6502::addressing_modes::AddressingMode::AbsoluteXIndexed => {
-                // TODO(javier-varez): This cannot be implemented until ldr and str instructions are available in arm_asm
-                unimplemented!();
+                let mos6502::addressing_modes::Operand::U16(value) = operand else {
+                    panic!("Unexpected operand type {:?} for AddressingMode::AbsoluteXIndexed", operand);
+                };
+
+                opcode_stream.push_opcode(
+                    arm_asm::Add::new(DECODED_OP_REGISTER, X_REGISTER)
+                        .with_immediate(Immediate::new(value as u64))
+                        .generate(),
+                );
             }
             mos6502::addressing_modes::AddressingMode::AbsoluteYIndexed => {
-                // TODO(javier-varez): This cannot be implemented until ldr and str instructions are available in arm_asm
-                unimplemented!();
+                let mos6502::addressing_modes::Operand::U16(value) = operand else {
+                    panic!("Unexpected operand type {:?} for AddressingMode::AbsoluteYIndexed", operand);
+                };
+
+                opcode_stream.push_opcode(
+                    arm_asm::Add::new(DECODED_OP_REGISTER, Y_REGISTER)
+                        .with_immediate(Immediate::new(value as u64))
+                        .generate(),
+                );
             }
             mos6502::addressing_modes::AddressingMode::Immediate => {
-                let value = match operand {
-                    mos6502::addressing_modes::Operand::U8(val) => val,
-                    other => {
-                        panic!(
-                            "Unexpected operand {:?} for AddressingMode::Immediate",
-                            other
-                        )
-                    }
+                let mos6502::addressing_modes::Operand::U8(value) = operand else {
+                    panic!(
+                        "Unexpected operand {:?} for AddressingMode::Immediate",
+                        operand
+                    )
                 };
+
                 opcode_stream.push_opcode(
                     arm_asm::Movz::new(DECODED_OP_REGISTER)
                         .with_immediate(arm_asm::Immediate::new(value as u64))
@@ -110,38 +132,177 @@ impl Compiler {
                 // Nothing to do here! :)
             }
             mos6502::addressing_modes::AddressingMode::Indirect => {
-                // TODO(javier-varez): This cannot be implemented until ldr and str instructions are available in arm_asm
-                unimplemented!();
+                let mos6502::addressing_modes::Operand::U16(value) = operand else {
+                    panic!("Unexpected operand type {:?} for AddressingMode::Indirect", operand);
+                };
+
+                opcode_stream.push_opcode(
+                    arm_asm::Ldrb::new(DECODED_OP_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
+                        .with_mode(arm_asm::MemoryAccessMode::UnsignedOffsetImmediate(
+                            Immediate::new(value as u64),
+                        ))
+                        .generate(),
+                );
             }
             mos6502::addressing_modes::AddressingMode::XIndexedIndirect => {
-                // TODO(javier-varez): This cannot be implemented until ldr and str instructions are available in arm_asm
-                unimplemented!();
+                let mos6502::addressing_modes::Operand::U8(value) = operand else {
+                    panic!("Unexpected operand type {:?} for AddressingMode::XIndexedIndirect", operand);
+                };
+
+                // (u8 operand + x reg) => addr in zero page => contains the address we want
+                // building the address here is kinda painful because the 6502 wraps around on the
+                // zero page. so if (x + imm) == 0xff, the first byte of the resulting addr is at
+                // memory location 0xff, while the second is at memory location 0x00 (not 0x100!).
+
+                // Since we don't know the value of X beforehand, we cannot tell if it will
+                // overflow at the boundary or not, so special handling is always needed (or we add
+                // conditionally executed code, which is not so nice to do at the moment, but could
+                // be a future optimization).
+                //
+                // THIS CODE IS WRONG!!!!
+                // Therefore the pseudocode for the asm below does the following:
+                //  - x + operand => scratch_register
+                //  - And 0xff with scratch_register => scratch_register
+                //  - ldrb(scratch_register) => decoded_op_register
+                //  - x + operand + 1 => scratch_register
+                //  - And 0xff with scratch_register => scratch_register
+                //  - ldrb(scratch_register) => scratch_register
+                //  - Add decoded_op_register + (scratch_register << 8) => decoded_op_register
+
+                opcode_stream.push_opcode(
+                    arm_asm::Add::new(SCRATCH_REGISTER, X_REGISTER)
+                        .with_immediate(Immediate::new(value as u64))
+                        .generate(),
+                );
+                opcode_stream.push_opcode(
+                    arm_asm::And::new(SCRATCH_REGISTER, SCRATCH_REGISTER)
+                        .with_immediate(Immediate::new(0xff))
+                        .generate(),
+                );
+                opcode_stream.push_opcode(
+                    arm_asm::Ldrb::new(DECODED_OP_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
+                        .with_mode(arm_asm::MemoryAccessMode::ShiftedRegister(SCRATCH_REGISTER))
+                        .generate(),
+                );
+                opcode_stream.push_opcode(
+                    arm_asm::Add::new(SCRATCH_REGISTER, X_REGISTER)
+                        .with_immediate(Immediate::new(value.wrapping_add(1) as u64))
+                        .generate(),
+                );
+                opcode_stream.push_opcode(
+                    arm_asm::And::new(SCRATCH_REGISTER, SCRATCH_REGISTER)
+                        .with_immediate(Immediate::new(0xff))
+                        .generate(),
+                );
+                opcode_stream.push_opcode(
+                    arm_asm::Ldrb::new(SCRATCH_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
+                        .with_mode(arm_asm::MemoryAccessMode::ShiftedRegister(SCRATCH_REGISTER))
+                        .generate(),
+                );
+                opcode_stream.push_opcode(
+                    arm_asm::Add::new(DECODED_OP_REGISTER, DECODED_OP_REGISTER)
+                        .with_shifted_reg(SCRATCH_REGISTER)
+                        .with_shift(arm_asm::RegShift::Lsl(8))
+                        .generate(),
+                );
             }
             mos6502::addressing_modes::AddressingMode::IndirectYIndexed => {
-                // TODO(javier-varez): This cannot be implemented until ldr and str instructions are available in arm_asm
-                unimplemented!();
+                let mos6502::addressing_modes::Operand::U8(value) = operand else {
+                    panic!("Unexpected operand type {:?} for AddressingMode::IndirectYIndexed", operand);
+                };
+
+                // (u8 operand) => addr in zero page + y reg => the address we want
+
+                if value == 0xff {
+                    // We have wraparound and needs special handling
+                    opcode_stream.push_opcode(
+                        arm_asm::Ldrb::new(DECODED_OP_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
+                            .with_mode(arm_asm::MemoryAccessMode::UnsignedOffsetImmediate(
+                                Immediate::new(0xff),
+                            ))
+                            .generate(),
+                    );
+                    opcode_stream.push_opcode(
+                        arm_asm::Ldrb::new(SCRATCH_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
+                            .with_mode(arm_asm::MemoryAccessMode::UnsignedOffsetImmediate(
+                                Immediate::new(0x00),
+                            ))
+                            .generate(),
+                    );
+                    opcode_stream.push_opcode(
+                        arm_asm::Add::new(DECODED_OP_REGISTER, DECODED_OP_REGISTER)
+                            .with_shifted_reg(SCRATCH_REGISTER)
+                            .with_shift(arm_asm::RegShift::Lsl(8))
+                            .generate(),
+                    );
+                } else {
+                    opcode_stream.push_opcode(
+                        arm_asm::Ldrh::new(DECODED_OP_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
+                            .with_mode(arm_asm::MemoryAccessMode::UnsignedOffsetImmediate(
+                                Immediate::new(value as u64),
+                            ))
+                            .generate(),
+                    );
+                    opcode_stream.push_opcode(
+                        arm_asm::Add::new(DECODED_OP_REGISTER, DECODED_OP_REGISTER)
+                            .with_shifted_reg(Y_REGISTER)
+                            .generate(),
+                    );
+                }
             }
             mos6502::addressing_modes::AddressingMode::Relative => {
                 // TODO(javier-varez): This cannot be implemented until ldr and str instructions are available in arm_asm
                 unimplemented!();
             }
             mos6502::addressing_modes::AddressingMode::Zeropage => {
-                // TODO(javier-varez): This cannot be implemented until ldr and str instructions are available in arm_asm
-                unimplemented!();
+                let mos6502::addressing_modes::Operand::U8(value) = operand else {
+                    panic!("Unexpected operand type {:?} for AddressingMode::Zeropage", operand);
+                };
+
+                opcode_stream.push_opcode(
+                    arm_asm::Movz::new(DECODED_OP_REGISTER)
+                        .with_immediate(Immediate::new(value as u64))
+                        .generate(),
+                );
             }
             mos6502::addressing_modes::AddressingMode::ZeropageXIndexed => {
-                // TODO(javier-varez): This cannot be implemented until ldr and str instructions are available in arm_asm
-                unimplemented!();
+                let mos6502::addressing_modes::Operand::U8(value) = operand else {
+                    panic!("Unexpected operand type {:?} for AddressingMode::ZeropageXIndexed", operand);
+                };
+
+                opcode_stream.push_opcode(
+                    arm_asm::Add::new(DECODED_OP_REGISTER, X_REGISTER)
+                        .with_immediate(Immediate::new(value as u64))
+                        .generate(),
+                );
             }
             mos6502::addressing_modes::AddressingMode::ZeropageYIndexed => {
-                // TODO(javier-varez): This cannot be implemented until ldr and str instructions are available in arm_asm
-                unimplemented!();
+                let mos6502::addressing_modes::Operand::U8(value) = operand else {
+                    panic!("Unexpected operand type {:?} for AddressingMode::ZeropageYIndexed", operand);
+                };
+
+                opcode_stream.push_opcode(
+                    arm_asm::Add::new(DECODED_OP_REGISTER, Y_REGISTER)
+                        .with_immediate(Immediate::new(value as u64))
+                        .generate(),
+                );
             }
         }
     }
 
     /// Handles the actual instruction, assuming that the decoded operand is available in DECODED_OP_REGISTER
-    fn emit_instruction(_opcode_stream: &mut OpCodeStream, _instruction: &mos6502::Instruction) {
+    fn emit_instruction(_opcode_stream: &mut OpCodeStream, instruction: &mos6502::Instruction) {
+        match instruction {
+            mos6502::Instruction {
+                opcode:
+                    mos6502::opcode::OpCode {
+                        base_instr: mos6502::instructions::BaseInstruction::Adc,
+                        ..
+                    },
+                ..
+            } => {}
+            _ => {}
+        }
         unimplemented!()
     }
 

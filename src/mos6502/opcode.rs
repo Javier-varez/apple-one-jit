@@ -3,8 +3,8 @@ use super::instructions::BaseInstruction;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct OpCode {
-    base_instr: BaseInstruction,
-    addressing_mode: AddressingMode,
+    pub base_instr: BaseInstruction,
+    pub addressing_mode: AddressingMode,
 }
 
 const OPCODES: [Option<OpCode>; 256] = [
