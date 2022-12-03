@@ -13,6 +13,7 @@ pub struct Instruction {
     pub operand: addressing_modes::Operand,
 }
 
+#[derive(Clone, Copy)]
 enum State {
     DecodeOpCode,
     DecodeOperand(opcode::OpCode, Option<u8>),
@@ -30,10 +31,11 @@ impl InstrDecoder {
     }
 
     pub fn feed(&mut self, byte: u8) -> Result<Option<Instruction>, Error> {
-        match &mut self.state {
+        match self.state.clone() {
             State::DecodeOpCode => {
                 if let Some(opcode) = opcode::translate(byte) {
                     if opcode.addressing_mode().operand_size() == 0 {
+                        self.state = State::DecodeOpCode;
                         Ok(Some(Instruction {
                             opcode,
                             operand: addressing_modes::Operand::None,
@@ -46,20 +48,24 @@ impl InstrDecoder {
                     Err(Error::UnknownOpCode)
                 }
             }
-            State::DecodeOperand(opcode, Some(first_byte)) => Ok(Some(Instruction {
-                opcode: *opcode,
-                operand: addressing_modes::Operand::U16(
-                    ((byte as u16) << 8) | (*first_byte as u16),
-                ),
-            })),
-            State::DecodeOperand(opcode, first_byte) => {
+            State::DecodeOperand(opcode, Some(first_byte)) => {
+                self.state = State::DecodeOpCode;
+                Ok(Some(Instruction {
+                    opcode,
+                    operand: addressing_modes::Operand::U16(
+                        ((byte as u16) << 8) | (first_byte as u16),
+                    ),
+                }))
+            }
+            State::DecodeOperand(opcode, None) => {
                 if opcode.addressing_mode().operand_size() == 1 {
+                    self.state = State::DecodeOpCode;
                     Ok(Some(Instruction {
-                        opcode: *opcode,
+                        opcode,
                         operand: addressing_modes::Operand::U8(byte),
                     }))
                 } else {
-                    *first_byte = Some(byte);
+                    self.state = State::DecodeOperand(opcode, Some(byte));
                     Ok(None)
                 }
             }
