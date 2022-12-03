@@ -4,6 +4,13 @@ use crate::dynamic_compiler::Error::Unknown6502OpCode;
 use crate::jit::{JitPage, OpCodeStream};
 use crate::mos6502;
 
+core::arch::global_asm!(include_str!("dynamic_compiler.S"));
+
+extern "C" {
+    fn jumpToEmulatedCode(ptr: *const (), state: *mut CpuState, memory: *mut u8);
+}
+
+#[derive(Debug)]
 pub enum Error {
     // TODO(ja): Add variants
     Unknown6502OpCode,
@@ -15,6 +22,15 @@ impl From<mos6502::Error> for Error {
             mos6502::Error::UnknownOpCode => Unknown6502OpCode,
         }
     }
+}
+
+#[repr(C)]
+#[derive(Default)]
+pub struct CpuState {
+    a: u64,
+    x: u64,
+    y: u64,
+    sp: u64,
 }
 
 pub struct Compiler {
@@ -61,11 +77,16 @@ impl Compiler {
     ) -> Result<(), Error> {
         for byte in buffer.iter() {
             if let Some(instr) = decoder.feed(*byte)? {
+                println!("Decoded instr {:?}", instr);
                 // Handle instruction
                 Self::emit_instruction_address_mode(opcode_stream, &instr);
                 Self::emit_instruction(opcode_stream, &instr);
             }
         }
+
+        // Just in case the instruction decoder did not find any isntr
+        opcode_stream.push_opcode(arm_asm::Ret::new().generate());
+
         Ok(())
     }
 
@@ -136,13 +157,38 @@ impl Compiler {
                     panic!("Unexpected operand type {:?} for AddressingMode::Indirect", operand);
                 };
 
-                opcode_stream.push_opcode(
-                    arm_asm::Ldrb::new(DECODED_OP_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
-                        .with_mode(arm_asm::MemoryAccessMode::UnsignedOffsetImmediate(
-                            Immediate::new(value as u64),
-                        ))
-                        .generate(),
-                );
+                if value & 0xff == 0xff {
+                    // This is annoying because a bug in the 6502 would cause a read of 0x33ff
+                    // to read the low byte from 0x33ff and the high byte from 0x3300
+                    opcode_stream.push_opcode(
+                        arm_asm::Ldrb::new(DECODED_OP_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
+                            .with_mode(arm_asm::MemoryAccessMode::UnsignedOffsetImmediate(
+                                Immediate::new(value as u64),
+                            ))
+                            .generate(),
+                    );
+                    opcode_stream.push_opcode(
+                        arm_asm::Ldrb::new(SCRATCH_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
+                            .with_mode(arm_asm::MemoryAccessMode::UnsignedOffsetImmediate(
+                                Immediate::new(value as u64),
+                            ))
+                            .generate(),
+                    );
+                    opcode_stream.push_opcode(
+                        arm_asm::Add::new(DECODED_OP_REGISTER, DECODED_OP_REGISTER)
+                            .with_shifted_reg(SCRATCH_REGISTER)
+                            .with_shift(arm_asm::RegShift::Lsl(8))
+                            .generate(),
+                    );
+                } else {
+                    opcode_stream.push_opcode(
+                        arm_asm::Ldrh::new(DECODED_OP_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
+                            .with_mode(arm_asm::MemoryAccessMode::UnsignedOffsetImmediate(
+                                Immediate::new(value as u64),
+                            ))
+                            .generate(),
+                    );
+                }
             }
             mos6502::addressing_modes::AddressingMode::XIndexedIndirect => {
                 let mos6502::addressing_modes::Operand::U8(value) = operand else {
@@ -290,26 +336,189 @@ impl Compiler {
         }
     }
 
-    /// Handles the actual instruction, assuming that the decoded operand is available in DECODED_OP_REGISTER
-    fn emit_instruction(_opcode_stream: &mut OpCodeStream, instruction: &mos6502::Instruction) {
-        match instruction {
-            mos6502::Instruction {
-                opcode:
-                    mos6502::opcode::OpCode {
-                        base_instr: mos6502::instructions::BaseInstruction::Adc,
-                        ..
-                    },
-                ..
-            } => {}
+    fn emit_deref_if_needed(
+        opcode_stream: &mut OpCodeStream,
+        instruction: &mos6502::Instruction,
+        dest_register: arm_asm::Register,
+    ) {
+        match instruction.opcode.addressing_mode().operand_type() {
+            mos6502::addressing_modes::OperandType::Memory => {
+                opcode_stream.push_opcode(
+                    arm_asm::Ldrb::new(dest_register, MEMORY_MAP_BASE_ADDR_REGISTER)
+                        .with_mode(arm_asm::MemoryAccessMode::ShiftedRegister(
+                            DECODED_OP_REGISTER,
+                        ))
+                        .generate(),
+                );
+            }
             _ => {}
         }
-        unimplemented!()
+    }
+
+    /// Handles the actual instruction, assuming that the decoded operand is available in DECODED_OP_REGISTER
+    fn emit_instruction(opcode_stream: &mut OpCodeStream, instruction: &mos6502::Instruction) {
+        match instruction.opcode.base_instruction() {
+            mos6502::instructions::BaseInstruction::Lda => {
+                match instruction.opcode.addressing_mode().operand_type() {
+                    mos6502::addressing_modes::OperandType::Memory => {
+                        opcode_stream.push_opcode(
+                            arm_asm::Ldrb::new(ACCUMULATOR_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
+                                .with_mode(arm_asm::MemoryAccessMode::ShiftedRegister(
+                                    DECODED_OP_REGISTER,
+                                ))
+                                .generate(),
+                        );
+                    }
+                    mos6502::addressing_modes::OperandType::Value => {
+                        opcode_stream.push_opcode(
+                            arm_asm::Mov::new(ACCUMULATOR_REGISTER, DECODED_OP_REGISTER).generate(),
+                        );
+                    }
+                    mos6502::addressing_modes::OperandType::None => {
+                        unimplemented!()
+                    }
+                }
+            }
+            mos6502::instructions::BaseInstruction::Adc => {
+                // TODO(javier-varez): handle carry as well... (both setting it after and using it
+                // if set before)
+                Self::emit_deref_if_needed(opcode_stream, instruction, DECODED_OP_REGISTER);
+                opcode_stream.push_opcode(
+                    arm_asm::Add::new(ACCUMULATOR_REGISTER, ACCUMULATOR_REGISTER)
+                        .with_shifted_reg(DECODED_OP_REGISTER)
+                        .generate(),
+                );
+            }
+            mos6502::instructions::BaseInstruction::And => {
+                Self::emit_deref_if_needed(opcode_stream, instruction, DECODED_OP_REGISTER);
+                opcode_stream.push_opcode(
+                    arm_asm::And::new(ACCUMULATOR_REGISTER, ACCUMULATOR_REGISTER)
+                        .with_shifted_reg(DECODED_OP_REGISTER)
+                        .generate(),
+                );
+            }
+            mos6502::instructions::BaseInstruction::Ora => {
+                Self::emit_deref_if_needed(opcode_stream, instruction, DECODED_OP_REGISTER);
+                opcode_stream.push_opcode(
+                    arm_asm::Or::new(ACCUMULATOR_REGISTER, ACCUMULATOR_REGISTER)
+                        .with_shifted_reg(DECODED_OP_REGISTER)
+                        .generate(),
+                );
+            }
+            mos6502::instructions::BaseInstruction::Eor => {
+                Self::emit_deref_if_needed(opcode_stream, instruction, DECODED_OP_REGISTER);
+                opcode_stream.push_opcode(
+                    arm_asm::Xor::new(ACCUMULATOR_REGISTER, ACCUMULATOR_REGISTER)
+                        .with_shifted_reg(DECODED_OP_REGISTER)
+                        .generate(),
+                );
+            }
+            mos6502::instructions::BaseInstruction::Rts => {
+                opcode_stream.push_opcode(arm_asm::Ret::new().generate());
+            }
+            _ => {
+                unimplemented!();
+            }
+        }
     }
 
     /// Runs the dynamically-reassembled code, protecting temporarily the inner page as RX.
     /// # Safety
     /// Must guarantee that the compiled code is valid and will naturally complete execution
-    pub unsafe fn run<U, T: Fn(*const ()) -> U>(&mut self, callable: T) -> U {
-        self.page.run(callable)
+    pub unsafe fn run(&mut self, state: &mut CpuState, memory: &mut [u8]) {
+        self.page.run(|ptr| {
+            jumpToEmulatedCode(ptr, state as *mut CpuState, memory.as_mut_ptr());
+        })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    #[test]
+    fn empty_test() {
+        use super::*;
+
+        let mut state = CpuState::default();
+        let mut memory = [0u8; 256];
+
+        let mut compiler = Compiler::new().unwrap();
+        compiler.translate_code(&[]).unwrap();
+        unsafe { compiler.run(&mut state, &mut memory) };
+    }
+
+    #[test]
+    fn add_test() {
+        use super::*;
+
+        let mut state = CpuState::default();
+        let mut memory = [0u8; 256];
+
+        let mut compiler = Compiler::new().unwrap();
+        compiler
+            .translate_code(&[0xA9, 0x0A, 0x69, 0x14, 0x60])
+            .unwrap();
+        unsafe { compiler.run(&mut state, &mut memory) };
+
+        assert_eq!(state.a, 30);
+    }
+
+    #[test]
+    fn load_acc_immediate_test() {
+        use super::*;
+
+        let mut state = CpuState::default();
+        let mut memory = [0u8; 256];
+
+        let mut compiler = Compiler::new().unwrap();
+        compiler.translate_code(&[0xA9, 0x0A, 0x60]).unwrap();
+        unsafe { compiler.run(&mut state, &mut memory) };
+
+        assert_eq!(state.a, 10);
+    }
+
+    #[test]
+    fn load_acc_memory_test() {
+        use super::*;
+
+        let mut state = CpuState::default();
+        let mut memory = [0u8; 256];
+        memory[0xa] = 0x34;
+
+        let mut compiler = Compiler::new().unwrap();
+        compiler.translate_code(&[0xA5, 0x0A, 0x60]).unwrap();
+        unsafe { compiler.run(&mut state, &mut memory) };
+
+        assert_eq!(state.a, 0x34);
+    }
+
+    #[test]
+    fn add_immediate_test() {
+        use super::*;
+
+        let mut state = CpuState::default();
+        let mut memory = [0u8; 256];
+        memory[0xa] = 0x34;
+
+        let mut compiler = Compiler::new().unwrap();
+        compiler.translate_code(&[0xA5, 0x0A, 0x69, 0x10]).unwrap();
+        unsafe { compiler.run(&mut state, &mut memory) };
+
+        assert_eq!(state.a, 0x44);
+    }
+
+    #[test]
+    fn add_memory_test() {
+        use super::*;
+
+        let mut state = CpuState::default();
+        let mut memory = [0u8; 256];
+        memory[0xa] = 0x34;
+        memory[0x10] = 0x44;
+
+        let mut compiler = Compiler::new().unwrap();
+        compiler.translate_code(&[0xA5, 0x0A, 0x65, 0x10]).unwrap();
+        unsafe { compiler.run(&mut state, &mut memory) };
+
+        assert_eq!(state.a, 0x78);
     }
 }

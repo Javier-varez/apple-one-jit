@@ -36,6 +36,30 @@ impl AddressingMode {
     pub fn operand_size(&self) -> usize {
         INST_SIZE_MAP[*self as usize]
     }
+    pub fn operand_type(&self) -> OperandType {
+        match self {
+            AddressingMode::Accumulator => OperandType::Memory,
+            AddressingMode::Absolute => OperandType::Memory,
+            AddressingMode::AbsoluteXIndexed => OperandType::Memory,
+            AddressingMode::AbsoluteYIndexed => OperandType::Memory,
+            AddressingMode::Immediate => OperandType::Value,
+            AddressingMode::Implied => OperandType::None,
+            AddressingMode::Indirect => OperandType::Memory,
+            AddressingMode::IndirectYIndexed => OperandType::Memory,
+            AddressingMode::XIndexedIndirect => OperandType::Memory,
+            AddressingMode::Relative => OperandType::Memory,
+            AddressingMode::Zeropage => OperandType::Memory,
+            AddressingMode::ZeropageXIndexed => OperandType::Memory,
+            AddressingMode::ZeropageYIndexed => OperandType::Memory,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum OperandType {
+    Value,
+    Memory,
+    None,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
