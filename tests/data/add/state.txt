@@ -1,0 +1,18 @@
+{
+    "entry" : {
+        "accumulator" : 0,
+        "x" : 0,
+        "y" : 0,
+        "sp" : 0,
+        "pc" : 0,
+        "flags" : 0
+    },
+    "exit" : {
+        "accumulator" : 40,
+        "x" : 0,
+        "y" : 0,
+        "sp" : 0,
+        "pc" : 0,
+        "flags" : 0
+    }
+}

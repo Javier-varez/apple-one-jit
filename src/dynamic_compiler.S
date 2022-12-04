@@ -19,22 +19,28 @@ _jumpToEmulatedCode:
     stp x2,  x3,  [sp, #0x30]
     stp x0,  x1,  [sp, #0x20]
 
-	mov x10, x0
-	mov x11, x1
+    mov x10, x0
+    mov x11, x1
 
     // Restore state from r1
-	mov x5, x2
-	ldr x0, [x11, 0]
-	ldr x1, [x11, 8]
-	ldr x2, [x11, 16]
-	ldr x3, [x11, 24]
+    mov x5, x2
+    ldr x0, [x11, 0]
+    ldr x1, [x11, 8]
+    ldr x2, [x11, 16]
+    ldr x3, [x11, 24]
+    ldr x4, [x11, 32]
+    ldr x7, [x11, 40]
+    msr nzcv, x7
 
     blr x10
 
-	str x0, [x11, 0]
-	str x1, [x11, 8]
-	str x2, [x11, 16]
-	str x3, [x11, 24]
+    mrs x7, nzcv
+    str x0, [x11, 0]
+    str x1, [x11, 8]
+    str x2, [x11, 16]
+    str x3, [x11, 24]
+    str x4, [x11, 32]
+    str x7, [x11, 40]
 
     ldp x0,  x1,  [sp, #0x20]
     ldp x2,  x3,  [sp, #0x30]

@@ -73,6 +73,12 @@ impl InstrDecoder {
     }
 }
 
+impl Instruction {
+    pub fn instruction_size(&self) -> usize {
+        self.opcode.addressing_mode().operand_size() + 1
+    }
+}
+
 #[cfg(test)]
 mod test {
     use crate::mos6502::addressing_modes::{AddressingMode, Operand};

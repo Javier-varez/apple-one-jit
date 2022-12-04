@@ -2,7 +2,7 @@ use crate::arm_asm;
 use crate::arm_asm::Immediate;
 use crate::dynamic_compiler::Error::Unknown6502OpCode;
 use crate::jit::{JitPage, OpCodeStream};
-use crate::mos6502;
+use crate::mos6502::{self, opcode};
 
 core::arch::global_asm!(include_str!("dynamic_compiler.S"));
 
@@ -25,12 +25,14 @@ impl From<mos6502::Error> for Error {
 }
 
 #[repr(C)]
-#[derive(Default)]
+#[derive(Default, PartialEq, Debug)]
 pub struct CpuState {
-    a: u64,
-    x: u64,
-    y: u64,
-    sp: u64,
+    pub a: u64,
+    pub x: u64,
+    pub y: u64,
+    pub sp: u64,
+    pub pc: u64,
+    pub flags: u64,
 }
 
 pub struct Compiler {
@@ -42,9 +44,10 @@ const ACCUMULATOR_REGISTER: arm_asm::Register = arm_asm::Register::X0;
 const X_REGISTER: arm_asm::Register = arm_asm::Register::X1;
 const Y_REGISTER: arm_asm::Register = arm_asm::Register::X2;
 const SP_REGISTER: arm_asm::Register = arm_asm::Register::X3;
-const DECODED_OP_REGISTER: arm_asm::Register = arm_asm::Register::X4;
+const PC_REGISTER: arm_asm::Register = arm_asm::Register::X4;
 const MEMORY_MAP_BASE_ADDR_REGISTER: arm_asm::Register = arm_asm::Register::X5;
-const SCRATCH_REGISTER: arm_asm::Register = arm_asm::Register::X6;
+const DECODED_OP_REGISTER: arm_asm::Register = arm_asm::Register::X6;
+const SCRATCH_REGISTER: arm_asm::Register = arm_asm::Register::X7;
 
 impl Compiler {
     /// Constructs a new dynamic re-compiler, allocating a JIT page to store the generated code
@@ -62,14 +65,25 @@ impl Compiler {
         })
     }
 
+    fn emit_increment_pc(opcode_stream: &mut OpCodeStream, instruction: &mos6502::Instruction) {
+        opcode_stream.push_opcode(
+            arm_asm::Add::new(PC_REGISTER, PC_REGISTER)
+                .with_immediate(arm_asm::Immediate::new(
+                    instruction.instruction_size() as u64
+                ))
+                .generate(),
+        );
+    }
+
     // Register allocation:
     // R0(8-bit) -> Accumulator
     // R1(8-bit) -> X Register
     // R2(8-bit) -> Y Register
     // R3(8-bit) -> SP Register
-    // R4(8/16-bit) -> Decoded operand (if any)
-    // R5(64-bit) -> Base address of the 6502 memory map.
-    // R6(8/16-bit) -> Scratch register
+    // R4(16-bit) -> PC
+    // R5(8/16-bit) -> Decoded operand (if any)
+    // R6(64-bit) -> Base address of the 6502 memory map.
+    // R7(8/16-bit) -> Scratch register
     fn translate_code_impl(
         decoder: &mut mos6502::InstrDecoder,
         opcode_stream: &mut OpCodeStream,
@@ -78,9 +92,13 @@ impl Compiler {
         for byte in buffer.iter() {
             if let Some(instr) = decoder.feed(*byte)? {
                 println!("Decoded instr {:?}", instr);
-                // Handle instruction
                 Self::emit_instruction_address_mode(opcode_stream, &instr);
                 Self::emit_instruction(opcode_stream, &instr);
+                if !instr.opcode.base_instruction().is_branching_op() {
+                    // Conditional branchs need to handle this internally. Jumps simply don't need
+                    // this because they always set the PC
+                    Self::emit_increment_pc(opcode_stream, &instr);
+                }
             }
         }
 
@@ -359,25 +377,85 @@ impl Compiler {
     fn emit_instruction(opcode_stream: &mut OpCodeStream, instruction: &mos6502::Instruction) {
         match instruction.opcode.base_instruction() {
             mos6502::instructions::BaseInstruction::Lda => {
-                match instruction.opcode.addressing_mode().operand_type() {
-                    mos6502::addressing_modes::OperandType::Memory => {
-                        opcode_stream.push_opcode(
-                            arm_asm::Ldrb::new(ACCUMULATOR_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
-                                .with_mode(arm_asm::MemoryAccessMode::ShiftedRegister(
-                                    DECODED_OP_REGISTER,
-                                ))
-                                .generate(),
-                        );
-                    }
-                    mos6502::addressing_modes::OperandType::Value => {
-                        opcode_stream.push_opcode(
-                            arm_asm::Mov::new(ACCUMULATOR_REGISTER, DECODED_OP_REGISTER).generate(),
-                        );
-                    }
-                    mos6502::addressing_modes::OperandType::None => {
-                        unimplemented!()
-                    }
-                }
+                assert_eq!(
+                    instruction.opcode.addressing_mode().operand_type(),
+                    mos6502::addressing_modes::OperandType::Memory
+                );
+                // TODO(javier-varez): Update flags
+                opcode_stream.push_opcode(
+                    arm_asm::Ldrb::new(ACCUMULATOR_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
+                        .with_mode(arm_asm::MemoryAccessMode::ShiftedRegister(
+                            DECODED_OP_REGISTER,
+                        ))
+                        .generate(),
+                );
+            }
+            mos6502::instructions::BaseInstruction::Ldx => {
+                assert_eq!(
+                    instruction.opcode.addressing_mode().operand_type(),
+                    mos6502::addressing_modes::OperandType::Memory
+                );
+                // TODO(javier-varez): Update flags
+                opcode_stream.push_opcode(
+                    arm_asm::Ldrb::new(X_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
+                        .with_mode(arm_asm::MemoryAccessMode::ShiftedRegister(
+                            DECODED_OP_REGISTER,
+                        ))
+                        .generate(),
+                );
+            }
+            mos6502::instructions::BaseInstruction::Ldy => {
+                assert_eq!(
+                    instruction.opcode.addressing_mode().operand_type(),
+                    mos6502::addressing_modes::OperandType::Memory
+                );
+                // TODO(javier-varez): Update flags
+                opcode_stream.push_opcode(
+                    arm_asm::Ldrb::new(Y_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
+                        .with_mode(arm_asm::MemoryAccessMode::ShiftedRegister(
+                            DECODED_OP_REGISTER,
+                        ))
+                        .generate(),
+                );
+            }
+            mos6502::instructions::BaseInstruction::Sta => {
+                assert!(
+                    instruction.opcode.addressing_mode().operand_type()
+                        == mos6502::addressing_modes::OperandType::Memory
+                );
+                opcode_stream.push_opcode(
+                    arm_asm::Strb::new(ACCUMULATOR_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
+                        .with_mode(arm_asm::MemoryAccessMode::ShiftedRegister(
+                            DECODED_OP_REGISTER,
+                        ))
+                        .generate(),
+                )
+            }
+            mos6502::instructions::BaseInstruction::Stx => {
+                assert!(
+                    instruction.opcode.addressing_mode().operand_type()
+                        == mos6502::addressing_modes::OperandType::Memory
+                );
+                opcode_stream.push_opcode(
+                    arm_asm::Strb::new(X_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
+                        .with_mode(arm_asm::MemoryAccessMode::ShiftedRegister(
+                            DECODED_OP_REGISTER,
+                        ))
+                        .generate(),
+                )
+            }
+            mos6502::instructions::BaseInstruction::Sty => {
+                assert!(
+                    instruction.opcode.addressing_mode().operand_type()
+                        == mos6502::addressing_modes::OperandType::Memory
+                );
+                opcode_stream.push_opcode(
+                    arm_asm::Strb::new(Y_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
+                        .with_mode(arm_asm::MemoryAccessMode::ShiftedRegister(
+                            DECODED_OP_REGISTER,
+                        ))
+                        .generate(),
+                )
             }
             mos6502::instructions::BaseInstruction::Adc => {
                 // TODO(javier-varez): handle carry as well... (both setting it after and using it
@@ -413,7 +491,36 @@ impl Compiler {
                         .generate(),
                 );
             }
+            mos6502::instructions::BaseInstruction::Tax => {
+                // TODO(javier-varez): Update flags
+                opcode_stream
+                    .push_opcode(arm_asm::Mov::new(X_REGISTER, ACCUMULATOR_REGISTER).generate());
+            }
+            mos6502::instructions::BaseInstruction::Tay => {
+                // TODO(javier-varez): Update flags
+                opcode_stream
+                    .push_opcode(arm_asm::Mov::new(Y_REGISTER, ACCUMULATOR_REGISTER).generate());
+            }
+            mos6502::instructions::BaseInstruction::Tsx => {
+                // TODO(javier-varez): Update flags
+                opcode_stream.push_opcode(arm_asm::Mov::new(X_REGISTER, SP_REGISTER).generate());
+            }
+            mos6502::instructions::BaseInstruction::Txa => {
+                // TODO(javier-varez): Update flags
+                opcode_stream
+                    .push_opcode(arm_asm::Mov::new(ACCUMULATOR_REGISTER, X_REGISTER).generate());
+            }
+            mos6502::instructions::BaseInstruction::Tya => {
+                // TODO(javier-varez): Update flags
+                opcode_stream
+                    .push_opcode(arm_asm::Mov::new(ACCUMULATOR_REGISTER, Y_REGISTER).generate());
+            }
+            mos6502::instructions::BaseInstruction::Txs => {
+                // TODO(javier-varez): Update flags
+                opcode_stream.push_opcode(arm_asm::Mov::new(SP_REGISTER, X_REGISTER).generate());
+            }
             mos6502::instructions::BaseInstruction::Rts => {
+                // TODO(javier-varez): Pop pc from stack and set it before actually returning
                 opcode_stream.push_opcode(arm_asm::Ret::new().generate());
             }
             _ => {
