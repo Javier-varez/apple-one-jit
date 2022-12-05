@@ -161,8 +161,8 @@ pub fn run_demo() {
 mod test {
     use super::*;
     use crate::arm_asm::{
-        And, Branch, Condition, Ldrd, MemoryAccessMode, Mov, MovShift, Movk, Movn, Movz, Or,
-        RegShift, SignedImmediate, Strd, Sub, Xor,
+        And, Branch, Condition, Ldrd, MemoryAccessMode, Mov, MovShift, Movk, Movn, Movz, Mrs, Msr,
+        Or, RegShift, SetF8, SignedImmediate, Strd, Sub, Sxtb, Xor, NZCV,
     };
     use region::page;
 
@@ -805,5 +805,67 @@ mod test {
         };
         assert_eq!(output[0], 0x1234_5678_9012_3456);
         assert_eq!(output[1], 0x1234_5678_9012_3456);
+    }
+
+    #[test]
+    fn test_sign_extend() {
+        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+
+        jit_page.populate(|opcode_stream| {
+            // Sign extend byte on x0
+            opcode_stream.push_opcode(Sxtb::new(Register::X0, Register::X0).generate());
+            opcode_stream.push_opcode(Ret::new().generate());
+        });
+
+        let value = unsafe { invoke!(jit_page, extern "C" fn(u8) -> u32, 0x84) };
+        assert_eq!(value, 0xffffff84);
+        let value = unsafe { invoke!(jit_page, extern "C" fn(u8) -> u32, 0x73) };
+        assert_eq!(value, 0x73);
+    }
+
+    #[test]
+    fn test_set_get_flags() {
+        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+
+        jit_page.populate(|opcode_stream| {
+            opcode_stream.push_opcode(Msr::new(NZCV, Register::X0).generate());
+            opcode_stream.push_opcode(Mrs::new(Register::X0, NZCV).generate());
+            opcode_stream.push_opcode(Ret::new().generate());
+        });
+
+        let value = unsafe { invoke!(jit_page, extern "C" fn(u64) -> u64, 0xFFFFFFFFFFFFFFF) };
+        assert_eq!(value, 0xF0000000);
+
+        jit_page.populate(|opcode_stream| {
+            opcode_stream.push_opcode(
+                Movz::new(Register::X1)
+                    .with_immediate(Immediate::new(0x00))
+                    .generate(),
+            );
+            opcode_stream.push_opcode(Msr::new(NZCV, Register::X1).generate());
+            opcode_stream.push_opcode(SetF8::new(Register::X0).generate());
+            opcode_stream.push_opcode(Mrs::new(Register::X0, NZCV).generate());
+            opcode_stream.push_opcode(Ret::new().generate());
+        });
+
+        const N: u64 = 0x80000000;
+        const Z: u64 = 0x40000000;
+        const V: u64 = 0x10000000;
+        assert_eq!(
+            unsafe { invoke!(jit_page, extern "C" fn(u32) -> u64, 0) },
+            Z
+        );
+        assert_eq!(
+            unsafe { invoke!(jit_page, extern "C" fn(u32) -> u64, 0x80) },
+            V | N
+        );
+        assert_eq!(
+            unsafe { invoke!(jit_page, extern "C" fn(u32) -> u64, 0xffffff80) },
+            N
+        );
+        assert_eq!(
+            unsafe { invoke!(jit_page, extern "C" fn(u32) -> u64, 0xffffff7f) },
+            V
+        );
     }
 }

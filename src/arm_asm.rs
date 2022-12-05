@@ -1069,3 +1069,144 @@ pub use memory_op::Strb;
 pub use memory_op::Strd;
 pub use memory_op::Strh;
 pub use memory_op::Strw;
+
+/// A `setf8` operation for Aarch64 (64-bit)
+/// ```
+///     use apple_one_jit::arm_asm::{Register, SetF8};
+///     let opcode = SetF8::new(
+///             Register::X1,
+///         ).generate();
+/// ```
+pub struct SetF8 {
+    reg: Register,
+}
+
+impl SetF8 {
+    pub fn new(reg: Register) -> Self {
+        Self { reg }
+    }
+
+    pub fn generate(self) -> OpCode {
+        const OPCODE_BASE: u32 = 0x3a00_080d;
+        const REG_OFFSET: usize = 5;
+        OpCode(OPCODE_BASE | ((self.reg as u32) << REG_OFFSET))
+    }
+}
+
+/// A `sxtb` operation for Aarch64 (64-bit)
+/// ```
+///     use apple_one_jit::arm_asm::{Register, Sxtb};
+///     let opcode = Sxtb::new(
+///             Register::X1,
+///             Register::X1,
+///         ).generate();
+/// ```
+pub struct Sxtb {
+    dest_reg: Register,
+    source_reg: Register,
+}
+
+impl Sxtb {
+    pub fn new(dest_reg: Register, source_reg: Register) -> Self {
+        Self {
+            dest_reg,
+            source_reg,
+        }
+    }
+
+    pub fn generate(self) -> OpCode {
+        const OPCODE_BASE: u32 = 0x9340_1c00;
+        const DEST_REG_OFFSET: usize = 0;
+        const SRC_REG_OFFSET: usize = 5;
+        OpCode(
+            OPCODE_BASE
+                | ((self.dest_reg as u32) << DEST_REG_OFFSET)
+                | ((self.source_reg as u32) << SRC_REG_OFFSET),
+        )
+    }
+}
+
+pub struct SystemRegister(u8, u8, u8, u8, u8);
+pub const NZCV: SystemRegister = SystemRegister(3, 3, 4, 2, 0);
+
+/// A `msr` operation for Aarch64 (64-bit)
+/// ```
+///     use apple_one_jit::arm_asm::{NZCV, Register, Msr};
+///     let opcode = Msr::new(
+///             NZCV,
+///             Register::X1,
+///         ).generate();
+/// ```
+pub struct Msr {
+    source_reg: Register,
+    dest_reg: SystemRegister,
+}
+
+impl Msr {
+    pub fn new(dest_reg: SystemRegister, source_reg: Register) -> Self {
+        Self {
+            source_reg,
+            dest_reg,
+        }
+    }
+
+    pub fn generate(self) -> OpCode {
+        const OPCODE_BASE: u32 = 0xd510_0000;
+        const REG_OFFSET: usize = 0;
+        const OP2_OFFSET: usize = 5;
+        const CRM_OFFSET: usize = 8;
+        const CRN_OFFSET: usize = 12;
+        const OP1_OFFSET: usize = 16;
+        const OP0_OFFSET: usize = 19;
+        OpCode(
+            OPCODE_BASE
+                | ((self.source_reg as u32) << REG_OFFSET)
+                | ((self.dest_reg.4 as u32) << OP2_OFFSET)
+                | ((self.dest_reg.3 as u32) << CRM_OFFSET)
+                | ((self.dest_reg.2 as u32) << CRN_OFFSET)
+                | ((self.dest_reg.1 as u32) << OP1_OFFSET)
+                | (((self.dest_reg.0 as u32) - 2) << OP0_OFFSET),
+        )
+    }
+}
+
+/// A `mrs` operation for Aarch64 (64-bit)
+/// ```
+///     use apple_one_jit::arm_asm::{NZCV, Register, Mrs};
+///     let opcode = Mrs::new(
+///             Register::X1,
+///             NZCV,
+///         ).generate();
+/// ```
+pub struct Mrs {
+    dest_reg: Register,
+    source_reg: SystemRegister,
+}
+
+impl Mrs {
+    pub fn new(dest_reg: Register, source_reg: SystemRegister) -> Self {
+        Self {
+            source_reg,
+            dest_reg,
+        }
+    }
+
+    pub fn generate(self) -> OpCode {
+        const OPCODE_BASE: u32 = 0xd530_0000;
+        const REG_OFFSET: usize = 0;
+        const OP2_OFFSET: usize = 5;
+        const CRM_OFFSET: usize = 8;
+        const CRN_OFFSET: usize = 12;
+        const OP1_OFFSET: usize = 16;
+        const OP0_OFFSET: usize = 19;
+        OpCode(
+            OPCODE_BASE
+                | ((self.dest_reg as u32) << REG_OFFSET)
+                | ((self.source_reg.4 as u32) << OP2_OFFSET)
+                | ((self.source_reg.3 as u32) << CRM_OFFSET)
+                | ((self.source_reg.2 as u32) << CRN_OFFSET)
+                | ((self.source_reg.1 as u32) << OP1_OFFSET)
+                | (((self.source_reg.0 as u32) & 1) << OP0_OFFSET),
+        )
+    }
+}
