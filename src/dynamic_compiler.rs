@@ -373,89 +373,84 @@ impl Compiler {
         }
     }
 
+    fn emit_load_instruction(opcode_stream: &mut OpCodeStream, instruction: &mos6502::Instruction) {
+        let dest_reg = match instruction.opcode.base_instruction() {
+            mos6502::instructions::BaseInstruction::Lda => ACCUMULATOR_REGISTER,
+            mos6502::instructions::BaseInstruction::Ldx => X_REGISTER,
+            mos6502::instructions::BaseInstruction::Ldy => Y_REGISTER,
+            _ => {
+                unreachable!()
+            }
+        };
+
+        match instruction.opcode.addressing_mode().operand_type() {
+            mos6502::addressing_modes::OperandType::Memory => {
+                opcode_stream.push_opcode(
+                    arm_asm::Ldrb::new(dest_reg, MEMORY_MAP_BASE_ADDR_REGISTER)
+                        .with_mode(arm_asm::MemoryAccessMode::ShiftedRegister(
+                            DECODED_OP_REGISTER,
+                        ))
+                        .generate(),
+                );
+            }
+            mos6502::addressing_modes::OperandType::Value => {
+                opcode_stream
+                    .push_opcode(arm_asm::Mov::new(dest_reg, DECODED_OP_REGISTER).generate());
+            }
+            mos6502::addressing_modes::OperandType::None => {
+                unreachable!()
+            }
+        }
+
+        opcode_stream.push_opcode(arm_asm::SetF8::new(dest_reg).generate());
+    }
+
+    fn emit_store_instruction(
+        opcode_stream: &mut OpCodeStream,
+        instruction: &mos6502::Instruction,
+    ) {
+        let source_reg = match instruction.opcode.base_instruction() {
+            mos6502::instructions::BaseInstruction::Lda => ACCUMULATOR_REGISTER,
+            mos6502::instructions::BaseInstruction::Ldx => X_REGISTER,
+            mos6502::instructions::BaseInstruction::Ldy => Y_REGISTER,
+            _ => {
+                unreachable!()
+            }
+        };
+
+        assert!(
+            instruction.opcode.addressing_mode().operand_type()
+                == mos6502::addressing_modes::OperandType::Memory
+        );
+        opcode_stream.push_opcode(
+            arm_asm::Strb::new(source_reg, MEMORY_MAP_BASE_ADDR_REGISTER)
+                .with_mode(arm_asm::MemoryAccessMode::ShiftedRegister(
+                    DECODED_OP_REGISTER,
+                ))
+                .generate(),
+        );
+    }
+
     /// Handles the actual instruction, assuming that the decoded operand is available in DECODED_OP_REGISTER
     fn emit_instruction(opcode_stream: &mut OpCodeStream, instruction: &mos6502::Instruction) {
         match instruction.opcode.base_instruction() {
             mos6502::instructions::BaseInstruction::Lda => {
-                assert_eq!(
-                    instruction.opcode.addressing_mode().operand_type(),
-                    mos6502::addressing_modes::OperandType::Memory
-                );
-                // TODO(javier-varez): Update flags
-                opcode_stream.push_opcode(
-                    arm_asm::Ldrb::new(ACCUMULATOR_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
-                        .with_mode(arm_asm::MemoryAccessMode::ShiftedRegister(
-                            DECODED_OP_REGISTER,
-                        ))
-                        .generate(),
-                );
+                Self::emit_load_instruction(opcode_stream, instruction);
             }
             mos6502::instructions::BaseInstruction::Ldx => {
-                assert_eq!(
-                    instruction.opcode.addressing_mode().operand_type(),
-                    mos6502::addressing_modes::OperandType::Memory
-                );
-                // TODO(javier-varez): Update flags
-                opcode_stream.push_opcode(
-                    arm_asm::Ldrb::new(X_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
-                        .with_mode(arm_asm::MemoryAccessMode::ShiftedRegister(
-                            DECODED_OP_REGISTER,
-                        ))
-                        .generate(),
-                );
+                Self::emit_load_instruction(opcode_stream, instruction);
             }
             mos6502::instructions::BaseInstruction::Ldy => {
-                assert_eq!(
-                    instruction.opcode.addressing_mode().operand_type(),
-                    mos6502::addressing_modes::OperandType::Memory
-                );
-                // TODO(javier-varez): Update flags
-                opcode_stream.push_opcode(
-                    arm_asm::Ldrb::new(Y_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
-                        .with_mode(arm_asm::MemoryAccessMode::ShiftedRegister(
-                            DECODED_OP_REGISTER,
-                        ))
-                        .generate(),
-                );
+                Self::emit_load_instruction(opcode_stream, instruction);
             }
             mos6502::instructions::BaseInstruction::Sta => {
-                assert!(
-                    instruction.opcode.addressing_mode().operand_type()
-                        == mos6502::addressing_modes::OperandType::Memory
-                );
-                opcode_stream.push_opcode(
-                    arm_asm::Strb::new(ACCUMULATOR_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
-                        .with_mode(arm_asm::MemoryAccessMode::ShiftedRegister(
-                            DECODED_OP_REGISTER,
-                        ))
-                        .generate(),
-                )
+                Self::emit_store_instruction(opcode_stream, instruction);
             }
             mos6502::instructions::BaseInstruction::Stx => {
-                assert!(
-                    instruction.opcode.addressing_mode().operand_type()
-                        == mos6502::addressing_modes::OperandType::Memory
-                );
-                opcode_stream.push_opcode(
-                    arm_asm::Strb::new(X_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
-                        .with_mode(arm_asm::MemoryAccessMode::ShiftedRegister(
-                            DECODED_OP_REGISTER,
-                        ))
-                        .generate(),
-                )
+                Self::emit_store_instruction(opcode_stream, instruction);
             }
             mos6502::instructions::BaseInstruction::Sty => {
-                assert!(
-                    instruction.opcode.addressing_mode().operand_type()
-                        == mos6502::addressing_modes::OperandType::Memory
-                );
-                opcode_stream.push_opcode(
-                    arm_asm::Strb::new(Y_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
-                        .with_mode(arm_asm::MemoryAccessMode::ShiftedRegister(
-                            DECODED_OP_REGISTER,
-                        ))
-                        .generate(),
-                )
+                Self::emit_store_instruction(opcode_stream, instruction);
             }
             mos6502::instructions::BaseInstruction::Adc => {
                 // TODO(javier-varez): handle carry as well... (both setting it after and using it
