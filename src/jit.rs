@@ -68,7 +68,17 @@ impl JitPage {
         let size = self.allocation.len() / std::mem::size_of::<MaybeUninit<OpCode>>();
         let slice = unsafe { std::slice::from_raw_parts_mut(ptr, size) };
         let mut opcode_stream = OpCodeStream::new(slice);
-        callable(&mut opcode_stream)
+        let val = callable(&mut opcode_stream);
+
+        // Invalidate the instruction cache at this virtual address (for this page) because the
+        // code in this page has changed
+        unsafe { core::arch::asm!("ic ivau, {va}", va = in(reg) self.allocation.as_ptr::<()>()) };
+        // Ensure the instruction finishes
+        unsafe { core::arch::asm!("dsb ish") };
+        // Then flush the instruction stream
+        unsafe { core::arch::asm!("isb") };
+
+        val
     }
 
     /// Maps the pages as READ_EXECUTE and then runs the callable, passing a pointer to the
