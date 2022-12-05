@@ -1,4 +1,26 @@
 use std::io::Write;
+use xshell::{cmd, Shell};
+
+fn build_6502_program(folder: &std::path::Path) -> std::path::PathBuf {
+    let mos_6502_dir = std::env::var("LLVM_MOS").unwrap();
+    let out_dir = std::env::var("OUT_DIR").unwrap();
+    let test_programs_dir = std::path::Path::new(&out_dir).join("test_programs");
+
+    let program_name = folder.file_name().and_then(|p| p.to_str()).unwrap();
+
+    println!("cargo:rerun-if-changed={}/main.s", folder.display());
+
+    let sh = Shell::new().unwrap();
+    sh.create_dir(&test_programs_dir).unwrap();
+    cmd!(sh, "{mos_6502_dir}/bin/llvm-mc --arch=mos {folder}/main.s --assemble --filetype=obj -o {test_programs_dir}/{program_name}.o").run().unwrap();
+    cmd!(sh, "{mos_6502_dir}/bin/llvm-objcopy -O binary {out_dir}/test_programs/{program_name}.o {test_programs_dir}/{program_name}").run().unwrap();
+
+    std::path::Path::new(&out_dir)
+        .join("test_programs")
+        .join(program_name)
+        .canonicalize()
+        .unwrap()
+}
 
 fn main() {
     let out_dir = std::env::var("OUT_DIR").unwrap();
@@ -9,13 +31,12 @@ fn main() {
         .unwrap()
         .map(|entry| entry.unwrap().path());
 
+    println!("cargo:rerun-if-changed=tests/data");
+
     for folder in folders {
+        let program_file = build_6502_program(&folder);
         let state_file = std::path::Path::new(&folder)
             .join("state.txt")
-            .canonicalize()
-            .unwrap();
-        let program_file = std::path::Path::new(&folder)
-            .join("program.bin")
             .canonicalize()
             .unwrap();
         let folder_name = folder.file_name().and_then(|e| e.to_str()).unwrap();
@@ -25,55 +46,9 @@ fn main() {
             "
 #[test]
 fn {name}_test() {{
-    use apple_one_jit::dynamic_compiler::{{CpuState, Compiler}};
-    use serde::Deserialize;
-
-    #[derive(Debug, Deserialize)]
-    struct State {{
-        accumulator: u64,
-        x: u64,
-        y: u64,
-        sp: u64,
-        pc: u64,
-        flags: u64,
-    }}
-
-    #[derive(Debug, Deserialize)]
-    struct StateFile {{
-        entry: State,
-        exit: State,
-    }}
-
     let code = include_bytes!(\"{program_file}\");
-    let state: StateFile = serde_json::from_str(include_str!(\"{state_file}\")).unwrap();
-
-    let mut cpu_state = CpuState {{
-        a: state.entry.accumulator,
-        x: state.entry.x,
-        y: state.entry.y,
-        sp: state.entry.sp,
-        pc: state.entry.pc,
-        flags: state.entry.flags,
-    }};
-
-    let expected_cpu_state = CpuState {{
-        a: state.exit.accumulator,
-        x: state.exit.x,
-        y: state.exit.y,
-        sp: state.exit.sp,
-        pc: state.exit.pc,
-        flags: state.exit.flags,
-    }};
-
-    let mut memory = [0u8; 256];
-
-    let mut compiler = Compiler::new().unwrap();
-    compiler
-        .translate_code(code)
-        .unwrap();
-    unsafe {{ compiler.run(&mut cpu_state, &mut memory) }};
-
-    assert_eq!(expected_cpu_state, cpu_state);
+    let state = include_str!(\"{state_file}\");
+    run_test(code, state);
 }}",
             name = folder_name,
             program_file = program_file.display(),

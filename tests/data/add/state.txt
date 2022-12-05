@@ -5,14 +5,14 @@
         "y" : 0,
         "sp" : 0,
         "pc" : 0,
-        "flags" : 0
+        "flags" : []
     },
     "exit" : {
-        "accumulator" : 40,
+        "accumulator" : 128,
         "x" : 0,
         "y" : 0,
         "sp" : 0,
         "pc" : 4,
-        "flags" : 0
+        "flags" : ["N", "V"]
     }
 }
