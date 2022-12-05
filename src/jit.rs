@@ -161,8 +161,8 @@ pub fn run_demo() {
 mod test {
     use super::*;
     use crate::arm_asm::{
-        And, Branch, Condition, Ldrd, MemoryAccessMode, Mov, MovShift, Movk, Movn, Movz, Mrs, Msr,
-        Or, RegShift, SetF8, SignedImmediate, Strd, Sub, Sxtb, Xor, NZCV,
+        Adc, And, Branch, Condition, Ldrd, MemoryAccessMode, Mov, MovShift, Movk, Movn, Movz, Mrs,
+        Msr, OpSize, Or, RegShift, Sbc, SetF8, SignedImmediate, Strd, Sub, Sxtb, Xor, NZCV,
     };
     use region::page;
 
@@ -866,6 +866,244 @@ mod test {
         assert_eq!(
             unsafe { invoke!(jit_page, extern "C" fn(u32) -> u64, 0xffffff7f) },
             V
+        );
+    }
+
+    #[test]
+    fn test_add_with_carry() {
+        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+
+        jit_page.populate(|opcode_stream| {
+            opcode_stream.push_opcode(Msr::new(NZCV, Register::X2).generate());
+            opcode_stream
+                .push_opcode(Adc::new(Register::X0, Register::X0, Register::X1).generate());
+            opcode_stream.push_opcode(Ret::new().generate());
+        });
+
+        const C: u64 = 0x20000000;
+        const NO_FLAGS: u64 = 0x00000000;
+        assert_eq!(
+            unsafe { invoke!(jit_page, extern "C" fn(u64, u64, u64) -> u64, 12, 4, C) },
+            17
+        );
+
+        assert_eq!(
+            unsafe {
+                invoke!(
+                    jit_page,
+                    extern "C" fn(u64, u64, u64) -> u64,
+                    12,
+                    4,
+                    NO_FLAGS
+                )
+            },
+            16
+        );
+
+        assert_eq!(
+            unsafe {
+                invoke!(
+                    jit_page,
+                    extern "C" fn(u64, u64, u64) -> u64,
+                    0x7FFF_FFFF_FFFF_FFFF,
+                    4,
+                    C
+                )
+            },
+            0x8000_0000_0000_0004
+        );
+
+        assert_eq!(
+            unsafe {
+                invoke!(
+                    jit_page,
+                    extern "C" fn(u64, u64, u64) -> u64,
+                    0xFFFF_FFFF_FFFF_FFFF,
+                    4,
+                    C
+                )
+            },
+            0x0000_0000_0000_0004
+        );
+    }
+
+    #[test]
+    fn test_add_with_carry_32_bit() {
+        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+
+        jit_page.populate(|opcode_stream| {
+            opcode_stream.push_opcode(Msr::new(NZCV, Register::X2).generate());
+            opcode_stream.push_opcode(
+                Adc::new(Register::X0, Register::X0, Register::X1)
+                    .with_op_size(OpSize::Size32)
+                    .generate(),
+            );
+            opcode_stream.push_opcode(Ret::new().generate());
+        });
+
+        const C: u64 = 0x20000000;
+        const NO_FLAGS: u64 = 0x00000000;
+        assert_eq!(
+            unsafe { invoke!(jit_page, extern "C" fn(u64, u64, u64) -> u64, 12, 4, C) },
+            17
+        );
+
+        assert_eq!(
+            unsafe {
+                invoke!(
+                    jit_page,
+                    extern "C" fn(u64, u64, u64) -> u64,
+                    12,
+                    4,
+                    NO_FLAGS
+                )
+            },
+            16
+        );
+
+        assert_eq!(
+            unsafe {
+                invoke!(
+                    jit_page,
+                    extern "C" fn(u64, u64, u64) -> u64,
+                    0x7FFF_FFFF,
+                    4,
+                    C
+                )
+            },
+            0x8000_0004
+        );
+
+        assert_eq!(
+            unsafe {
+                invoke!(
+                    jit_page,
+                    extern "C" fn(u64, u64, u64) -> u64,
+                    0xFFFF_FFFF,
+                    4,
+                    C
+                )
+            },
+            0x0000_0004
+        );
+    }
+
+    #[test]
+    fn test_sub_with_borrow() {
+        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+
+        jit_page.populate(|opcode_stream| {
+            opcode_stream.push_opcode(Msr::new(NZCV, Register::X2).generate());
+            opcode_stream
+                .push_opcode(Sbc::new(Register::X0, Register::X0, Register::X1).generate());
+            opcode_stream.push_opcode(Ret::new().generate());
+        });
+
+        const BORROW: u64 = 0x00000000;
+        const NO_BORROW: u64 = 0x20000000;
+        assert_eq!(
+            unsafe { invoke!(jit_page, extern "C" fn(u64, u64, u64) -> u64, 12, 4, BORROW) },
+            7
+        );
+
+        assert_eq!(
+            unsafe {
+                invoke!(
+                    jit_page,
+                    extern "C" fn(u64, u64, u64) -> u64,
+                    12,
+                    4,
+                    NO_BORROW
+                )
+            },
+            8
+        );
+
+        assert_eq!(
+            unsafe {
+                invoke!(
+                    jit_page,
+                    extern "C" fn(u64, u64, u64) -> u64,
+                    12,
+                    12,
+                    BORROW
+                )
+            },
+            0xFFFF_FFFF_FFFF_FFFF
+        );
+
+        assert_eq!(
+            unsafe {
+                invoke!(
+                    jit_page,
+                    extern "C" fn(u64, u64, u64) -> u64,
+                    11,
+                    12,
+                    NO_BORROW
+                )
+            },
+            0xFFFF_FFFF_FFFF_FFFF
+        );
+    }
+
+    #[test]
+    fn test_sub_with_borrow_32_bit() {
+        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+
+        jit_page.populate(|opcode_stream| {
+            opcode_stream.push_opcode(Msr::new(NZCV, Register::X2).generate());
+            opcode_stream.push_opcode(
+                Sbc::new(Register::X0, Register::X0, Register::X1)
+                    .with_op_size(OpSize::Size32)
+                    .generate(),
+            );
+            opcode_stream.push_opcode(Ret::new().generate());
+        });
+
+        const BORROW: u64 = 0x00000000;
+        const NO_BORROW: u64 = 0x20000000;
+        assert_eq!(
+            unsafe { invoke!(jit_page, extern "C" fn(u64, u64, u64) -> u64, 12, 4, BORROW) },
+            7
+        );
+
+        assert_eq!(
+            unsafe {
+                invoke!(
+                    jit_page,
+                    extern "C" fn(u64, u64, u64) -> u64,
+                    12,
+                    4,
+                    NO_BORROW
+                )
+            },
+            8
+        );
+
+        assert_eq!(
+            unsafe {
+                invoke!(
+                    jit_page,
+                    extern "C" fn(u64, u64, u64) -> u64,
+                    12,
+                    12,
+                    BORROW
+                )
+            },
+            0xFFFF_FFFF
+        );
+
+        assert_eq!(
+            unsafe {
+                invoke!(
+                    jit_page,
+                    extern "C" fn(u64, u64, u64) -> u64,
+                    11,
+                    12,
+                    NO_BORROW
+                )
+            },
+            0xFFFF_FFFF
         );
     }
 }

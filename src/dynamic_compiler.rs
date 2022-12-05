@@ -2,7 +2,7 @@ use crate::arm_asm;
 use crate::arm_asm::Immediate;
 use crate::dynamic_compiler::Error::Unknown6502OpCode;
 use crate::jit::{JitPage, OpCodeStream};
-use crate::mos6502::{self, opcode};
+use crate::mos6502;
 
 core::arch::global_asm!(include_str!("dynamic_compiler.S"));
 

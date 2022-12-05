@@ -10,6 +10,12 @@ impl OpCode {
     }
 }
 
+/// The size of the operation
+pub enum OpSize {
+    Size32 = 0,
+    Size64 = 1,
+}
+
 /// Immediate argument for a machine code instruction
 pub struct Immediate(u64);
 
@@ -389,6 +395,7 @@ mod arithmetic {
         source_reg: Register,
         dest_reg: Register,
         update_flags: bool,
+        op_size: OpSize,
         immediate: Option<ImmediateArgs>,
         register: Option<RegisterArgs>,
         _pd: PhantomData<T>,
@@ -400,6 +407,13 @@ mod arithmetic {
             self.update_flags = true;
             self
         }
+
+        /// Sets the size of the operation. 32 bits will use wX registers, 64 bits will use xX regs
+        /// Defaults to 64 bits if not called
+        pub fn with_op_size(mut self, op_size: OpSize) -> Self {
+            self.op_size = op_size;
+            self
+        }
     }
 
     impl<const OP: u8> ArithmeticOp<OP, operand::UnknownOperand> {
@@ -409,6 +423,7 @@ mod arithmetic {
                 source_reg,
                 dest_reg,
                 update_flags: false,
+                op_size: OpSize::Size64,
                 immediate: None,
                 register: None,
                 _pd: PhantomData {},
@@ -421,6 +436,7 @@ mod arithmetic {
                 source_reg: self.source_reg,
                 dest_reg: self.dest_reg,
                 update_flags: self.update_flags,
+                op_size: self.op_size,
                 immediate: Some(ImmediateArgs {
                     immediate: imm,
                     shift: false,
@@ -436,6 +452,7 @@ mod arithmetic {
                 source_reg: self.source_reg,
                 dest_reg: self.dest_reg,
                 update_flags: self.update_flags,
+                op_size: self.op_size,
                 immediate: None,
                 register: Some(RegisterArgs {
                     second_source_reg: reg,
@@ -467,7 +484,8 @@ mod arithmetic {
             let update_flags = if self.update_flags { 1 << 29 } else { 0 };
             let imm = (immediate.0 as u32) << IMM_OFFSET;
             let ty = (OP as u32) << 30;
-            OpCode(OPCODE_BASE | source_reg | dest_reg | shift | imm | update_flags | ty)
+            let op_size = (self.op_size as u32) << 31;
+            OpCode(OPCODE_BASE | source_reg | dest_reg | shift | imm | update_flags | ty | op_size)
         }
     }
 
@@ -495,8 +513,16 @@ mod arithmetic {
             let shift = reg_shift.map(|shift| shift.value()).unwrap_or(0);
             let update_flags = if self.update_flags { 1 << 29 } else { 0 };
             let ty = (OP as u32) << 30;
+            let op_size = (self.op_size as u32) << 31;
             OpCode(
-                OPCODE_BASE | source_reg | dest_reg | second_source_reg | shift | update_flags | ty,
+                OPCODE_BASE
+                    | source_reg
+                    | dest_reg
+                    | second_source_reg
+                    | shift
+                    | update_flags
+                    | ty
+                    | op_size,
             )
         }
     }
@@ -522,9 +548,87 @@ mod arithmetic {
     ///         .with_shifted_reg(Register::X30).with_shift(RegShift::Asr(3)).generate();
     /// ```
     pub type Sub = ArithmeticOp<{ Operation::Sub as u8 }, operand::UnknownOperand>;
+
+    /// Aarch64 asm arithmetic instructions with carry.
+    pub struct ArithmeticOpWithCarry<const OP: u8> {
+        dest_reg: Register,
+        source_reg1: Register,
+        source_reg2: Register,
+        update_flags: bool,
+        op_size: OpSize,
+    }
+
+    impl<const OP: u8> ArithmeticOpWithCarry<OP> {
+        /// Constructs the arithmetic operation
+        pub fn new(dest_reg: Register, source_reg1: Register, source_reg2: Register) -> Self {
+            Self {
+                dest_reg,
+                source_reg1,
+                source_reg2,
+                update_flags: false,
+                op_size: OpSize::Size64,
+            }
+        }
+
+        /// Updates the flags after the operation
+        pub fn update_flags(mut self) -> Self {
+            self.update_flags = true;
+            self
+        }
+
+        /// Sets the size of the operation. 32 bits will use wX registers, 64 bits will use xX regs
+        /// Defaults to 64 bits if not called
+        pub fn with_op_size(mut self, op_size: OpSize) -> Self {
+            self.op_size = op_size;
+            self
+        }
+
+        /// Generates the opcode for this instruction
+        pub fn generate(self) -> OpCode {
+            const OPCODE_BASE: u32 = 0x1a000000;
+            const SRC_REG1_OFFSET: usize = 5;
+            const SRC_REG2_OFFSET: usize = 16;
+            const DST_REG_OFFSET: usize = 0;
+
+            let source_reg1 = (self.source_reg1 as u32) << SRC_REG1_OFFSET;
+            let source_reg2 = (self.source_reg2 as u32) << SRC_REG2_OFFSET;
+            let dest_reg = (self.dest_reg as u32) << DST_REG_OFFSET;
+            let update_flags = if self.update_flags { 1 << 29 } else { 0 };
+            let ty = (OP as u32) << 30;
+            let op_size = (self.op_size as u32) << 31;
+            OpCode(OPCODE_BASE | source_reg1 | source_reg2 | dest_reg | update_flags | ty | op_size)
+        }
+    }
+
+    /// An arithmetic `adc` instruction for Aarch64
+    /// ```
+    ///     use apple_one_jit::arm_asm::{Register, Adc, OpSize};
+    ///     // w0 = w0 + w1 + C
+    ///     let opcode = Adc::new(
+    ///             Register::X0,
+    ///             Register::X0,
+    ///             Register::X1
+    ///         ).with_op_size(OpSize::Size32).generate();
+    /// ```
+    pub type Adc = ArithmeticOpWithCarry<{ Operation::Add as u8 }>;
+
+    /// An arithmetic `sbc` instruction for Aarch64
+    /// ```
+    ///     use apple_one_jit::arm_asm::{Register, Sbc, OpSize};
+    ///     // w0 = w0 - w1 - ~C
+    ///     let opcode = Sbc::new(
+    ///             Register::X0,
+    ///             Register::X1,
+    ///             Register::X1
+    ///         )
+    ///         .with_op_size(OpSize::Size32).generate();
+    /// ```
+    pub type Sbc = ArithmeticOpWithCarry<{ Operation::Sub as u8 }>;
 }
 
+pub use arithmetic::Adc;
 pub use arithmetic::Add;
+pub use arithmetic::Sbc;
 pub use arithmetic::Sub;
 
 mod logical_op {
