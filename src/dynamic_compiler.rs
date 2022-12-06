@@ -7,7 +7,10 @@ use crate::mos6502;
 core::arch::global_asm!(include_str!("dynamic_compiler.S"));
 
 extern "C" {
+    #[cfg(target_os = "macos")]
     fn jumpToEmulatedCode(ptr: *const (), state: *mut CpuState, memory: *mut u8);
+    #[cfg(not(target_os = "macos"))]
+    fn _jumpToEmulatedCode(ptr: *const (), state: *mut CpuState, memory: *mut u8);
 }
 
 #[derive(Debug)]
@@ -539,7 +542,10 @@ impl Compiler {
     /// Must guarantee that the compiled code is valid and will naturally complete execution
     pub unsafe fn run(&mut self, state: &mut CpuState, memory: &mut [u8]) {
         self.page.run(|ptr| {
+            #[cfg(target_os = "macos")]
             jumpToEmulatedCode(ptr, state as *mut CpuState, memory.as_mut_ptr());
+            #[cfg(not(target_os = "macos"))]
+            _jumpToEmulatedCode(ptr, state as *mut CpuState, memory.as_mut_ptr());
         })
     }
 }

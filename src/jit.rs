@@ -1,9 +1,7 @@
 use std::mem::MaybeUninit;
 
-use crate::arm_asm::{Add, Immediate, OpCode, Register, Ret, Udf};
-use region::{alloc, page, protect, Allocation, Protection};
-
-use libc::{sigaction, SIGILL};
+use crate::arm_asm::{OpCode, Udf};
+use region::{alloc, protect, Allocation, Protection};
 
 #[derive(Clone)]
 pub struct Marker {
@@ -108,63 +106,24 @@ impl JitPage {
     }
 }
 
-macro_rules! invoke {
-    ($jit:expr, $fn_type:ty $(, $args:expr)*) => {
-        $jit.run(|ptr: *const _| {
-            let func: $fn_type = std::mem::transmute_copy(&ptr);
-            func($($args),*)
-        })
-    };
-}
-
-unsafe fn handler(signal: libc::c_int, siginfo: *const libc::siginfo_t, _: *const libc::c_void) {
-    let siginfo = &*siginfo;
-    println!("Handled signal: {}!", signal);
-    println!("Address: {:?}", siginfo.si_addr());
-    libc::exit(libc::EXIT_FAILURE);
-}
-
-unsafe fn register_sigill_handler() {
-    let fn_ptr: unsafe fn(libc::c_int, *const libc::siginfo_t, *const libc::c_void) = handler;
-    let action: libc::sighandler_t = std::mem::transmute_copy(&fn_ptr);
-    let act = sigaction {
-        sa_mask: 0,
-        sa_flags: 0,
-        sa_sigaction: action,
-    };
-
-    let result = sigaction(SIGILL, &act as *const _, std::ptr::null_mut());
-    if result < 0 {
-        panic!("Error registering hander: {}", result);
-    }
-}
-
-pub fn run_demo() {
-    unsafe { register_sigill_handler() };
-
-    let mut jit_page = JitPage::allocate(page::size()).unwrap();
-
-    jit_page.populate(|opcode_stream| {
-        opcode_stream.push_opcode(
-            Add::new(Register::X0, Register::X0)
-                .with_immediate(Immediate::new(24))
-                .generate(),
-        );
-        opcode_stream.push_opcode(Ret::new().generate());
-    });
-
-    let val = unsafe { invoke!(jit_page, extern "C" fn(u64) -> u64, 10) };
-    println!("Value {}", val);
-}
-
 #[cfg(all(test, target_arch = "aarch64"))]
 mod test {
     use super::*;
     use crate::arm_asm::{
-        Adc, And, Branch, Condition, Ldrd, MemoryAccessMode, Mov, MovShift, Movk, Movn, Movz, Mrs,
-        Msr, OpSize, Or, RegShift, Sbc, SetF8, SignedImmediate, Strd, Sub, Sxtb, Xor, NZCV,
+        Adc, Add, And, Branch, Condition, Immediate, Ldrd, MemoryAccessMode, Mov, MovShift, Movk,
+        Movn, Movz, Mrs, Msr, OpSize, Or, RegShift, Register, Ret, Sbc, SetF8, SignedImmediate,
+        Strd, Sub, Sxtb, Xor, NZCV,
     };
     use region::page;
+
+    macro_rules! invoke {
+        ($jit:expr, $fn_type:ty $(, $args:expr)*) => {
+            $jit.run(|ptr: *const _| {
+                let func: $fn_type = std::mem::transmute_copy(&ptr);
+                func($($args),*)
+            })
+        };
+    }
 
     #[test]
     fn test_add_immediate() {
