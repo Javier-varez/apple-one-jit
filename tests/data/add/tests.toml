@@ -1,0 +1,3 @@
+[test]
+entry_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0, flags = []  }
+exit_state = { accumulator = 128, x = 0, y = 0, sp = 0, pc = 4, flags = ["N", "V"] }

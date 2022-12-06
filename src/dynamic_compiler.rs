@@ -453,14 +453,24 @@ impl Compiler {
                 Self::emit_store_instruction(opcode_stream, instruction);
             }
             mos6502::instructions::BaseInstruction::Adc => {
-                // TODO(javier-varez): handle carry as well... (both setting it after and using it
-                // if set before)
                 Self::emit_deref_if_needed(opcode_stream, instruction, DECODED_OP_REGISTER);
                 opcode_stream.push_opcode(
-                    arm_asm::Add::new(ACCUMULATOR_REGISTER, ACCUMULATOR_REGISTER)
-                        .with_shifted_reg(DECODED_OP_REGISTER)
-                        .generate(),
+                    arm_asm::Sxtb::new(ACCUMULATOR_REGISTER, ACCUMULATOR_REGISTER).generate(),
                 );
+                opcode_stream.push_opcode(
+                    arm_asm::Sxtb::new(DECODED_OP_REGISTER, DECODED_OP_REGISTER).generate(),
+                );
+                opcode_stream.push_opcode(
+                    arm_asm::Adc::new(
+                        ACCUMULATOR_REGISTER,
+                        ACCUMULATOR_REGISTER,
+                        DECODED_OP_REGISTER,
+                    )
+                    .update_flags()
+                    .with_op_size(arm_asm::OpSize::Size32)
+                    .generate(),
+                );
+                opcode_stream.push_opcode(arm_asm::SetF8::new(ACCUMULATOR_REGISTER).generate());
             }
             mos6502::instructions::BaseInstruction::And => {
                 Self::emit_deref_if_needed(opcode_stream, instruction, DECODED_OP_REGISTER);

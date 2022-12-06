@@ -35,8 +35,8 @@ fn main() {
 
     for folder in folders {
         let program_file = build_6502_program(&folder);
-        let state_file = std::path::Path::new(&folder)
-            .join("state.txt")
+        let test_file = std::path::Path::new(&folder)
+            .join("tests.toml")
             .canonicalize()
             .unwrap();
         let folder_name = folder.file_name().and_then(|e| e.to_str()).unwrap();
@@ -47,12 +47,13 @@ fn main() {
 #[test]
 fn {name}_test() {{
     let code = include_bytes!(\"{program_file}\");
-    let state = include_str!(\"{state_file}\");
-    run_test(code, state);
+    let tests = include_str!(\"{test_file}\");
+    let test_name = \"{name}\";
+    run_test(test_name, code, tests);
 }}",
             name = folder_name,
             program_file = program_file.display(),
-            state_file = state_file.display()
+            test_file = test_file.display()
         )
         .unwrap();
     }
