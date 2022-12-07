@@ -1,6 +1,9 @@
 .global _jumpToEmulatedCode
 _jumpToEmulatedCode:
-    // push all general purpose registers on the stack.
+    // Push all general purpose registers on the stack.
+    // TODO: This is definitely overkill. To be optimized later. Technically we only need to push
+    // those registers that are callee-saved AND we change... This keeps larger compatiblity and
+    // allows to reuse this code regardless of the ABI... At a clear performance cost...
     sub sp, sp, 0x120
     str x30, [sp, #0x110]
     stp x28, x29, [sp, #0x100]
@@ -23,23 +26,38 @@ _jumpToEmulatedCode:
     mov x11, x1
 
     // Restore state from r1
+    // X5 = memory base
     mov x5, x2
+    // x0 = acc
     ldr x0, [x11, 0]
+    // x1 = x reg
     ldr x1, [x11, 8]
+    // x2 = y reg
     ldr x2, [x11, 16]
+    // x3 = sp reg
     ldr x3, [x11, 24]
+    // Restore PC
     ldr x4, [x11, 32]
+    // Restore Flags into nzcv
     ldr x7, [x11, 40]
     msr nzcv, x7
 
+    // Jump to target code
     blr x10
 
+    // Restore Flags into nzcv
     mrs x7, nzcv
+    // acc = x0
     str x0, [x11, 0]
+    // x reg = x1
     str x1, [x11, 8]
+    // y reg = x2
     str x2, [x11, 16]
+    // sp reg = x3
     str x3, [x11, 24]
+    // pc reg = x4
     str x4, [x11, 32]
+    // flags = nzcv
     str x7, [x11, 40]
 
     ldp x0,  x1,  [sp, #0x20]

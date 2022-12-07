@@ -51,6 +51,7 @@ const PC_REGISTER: arm_asm::Register = arm_asm::Register::X4;
 const MEMORY_MAP_BASE_ADDR_REGISTER: arm_asm::Register = arm_asm::Register::X5;
 const DECODED_OP_REGISTER: arm_asm::Register = arm_asm::Register::X6;
 const SCRATCH_REGISTER: arm_asm::Register = arm_asm::Register::X7;
+const SCRATCH_REGISTER_2: arm_asm::Register = arm_asm::Register::X8;
 
 impl Compiler {
     /// Constructs a new dynamic re-compiler, allocating a JIT page to store the generated code
@@ -83,10 +84,13 @@ impl Compiler {
     // R1(8-bit) -> X Register
     // R2(8-bit) -> Y Register
     // R3(8-bit) -> SP Register
-    // R4(16-bit) -> PC
+    // R4(16-bit) -> PC Register
+    //
+    // These registers below are NOT saved
     // R5(8/16-bit) -> Decoded operand (if any)
     // R6(64-bit) -> Base address of the 6502 memory map.
     // R7(8/16-bit) -> Scratch register
+    // R8(8/16-bit) -> Scratch register 2
     fn translate_code_impl(
         decoder: &mut mos6502::InstrDecoder,
         opcode_stream: &mut OpCodeStream,
@@ -304,9 +308,17 @@ impl Compiler {
                     );
                 } else {
                     opcode_stream.push_opcode(
-                        arm_asm::Ldrh::new(DECODED_OP_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
+                        arm_asm::Add::new(SCRATCH_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
+                            .with_immediate(Immediate::new(value as u64))
+                            .generate(),
+                    );
+                    opcode_stream.push_opcode(
+                        arm_asm::Ldrh::new(DECODED_OP_REGISTER, SCRATCH_REGISTER)
                             .with_mode(arm_asm::MemoryAccessMode::UnsignedOffsetImmediate(
-                                Immediate::new(value as u64),
+                                // This offset is annoying! It is in 16-bit words... That is why
+                                // this instruction is split at the moment using the scratch
+                                // register
+                                Immediate::new(0),
                             ))
                             .generate(),
                     );
@@ -376,6 +388,65 @@ impl Compiler {
         }
     }
 
+    fn flags_mask(flags: &[mos6502::Flags]) -> u64 {
+        flags.iter().fold(0u64, |folded, flag| {
+            // This translates to the NZCV aarch64 register flags
+            folded
+                | match flag {
+                    mos6502::Flags::N => 0x8000_0000,
+                    mos6502::Flags::Z => 0x4000_0000,
+                    mos6502::Flags::C => 0x2000_0000,
+                    mos6502::Flags::V => 0x1000_0000,
+                }
+        })
+    }
+
+    fn inverted_flags_mask(flags: &[mos6502::Flags]) -> u64 {
+        Self::flags_mask(flags) ^ 0xF000_0000
+    }
+
+    // NOTE: this function uses the SCRATCH_REGISTER and SCRATCH_REGISTER_2, must not be overwritten
+    // by the callable
+    fn wrap_and_keep_flags(
+        opcode_stream: &mut OpCodeStream,
+        saved_flags: &[mos6502::Flags], // the flags to keep
+        callable: impl Fn(&mut OpCodeStream),
+    ) {
+        // TODO(javier-varez): I'm sure this could be optimized, but for now it shall work!
+
+        // Compute saved mask
+        if !saved_flags.is_empty() {
+            opcode_stream
+                .push_opcode(arm_asm::Mrs::new(SCRATCH_REGISTER, arm_asm::NZCV).generate());
+            opcode_stream.push_opcode(
+                arm_asm::And::new(SCRATCH_REGISTER, SCRATCH_REGISTER)
+                    .with_immediate(arm_asm::Immediate::new(Self::flags_mask(saved_flags)))
+                    .generate(),
+            );
+        }
+
+        callable(opcode_stream);
+
+        if !saved_flags.is_empty() {
+            opcode_stream
+                .push_opcode(arm_asm::Mrs::new(SCRATCH_REGISTER_2, arm_asm::NZCV).generate());
+            opcode_stream.push_opcode(
+                arm_asm::And::new(SCRATCH_REGISTER_2, SCRATCH_REGISTER_2)
+                    .with_immediate(arm_asm::Immediate::new(Self::inverted_flags_mask(
+                        saved_flags,
+                    )))
+                    .generate(),
+            );
+            opcode_stream.push_opcode(
+                arm_asm::Or::new(SCRATCH_REGISTER, SCRATCH_REGISTER)
+                    .with_shifted_reg(SCRATCH_REGISTER_2)
+                    .generate(),
+            );
+            opcode_stream
+                .push_opcode(arm_asm::Msr::new(arm_asm::NZCV, SCRATCH_REGISTER).generate());
+        }
+    }
+
     fn emit_load_instruction(opcode_stream: &mut OpCodeStream, instruction: &mos6502::Instruction) {
         let dest_reg = match instruction.opcode.base_instruction() {
             mos6502::instructions::BaseInstruction::Lda => ACCUMULATOR_REGISTER,
@@ -386,26 +457,33 @@ impl Compiler {
             }
         };
 
-        match instruction.opcode.addressing_mode().operand_type() {
-            mos6502::addressing_modes::OperandType::Memory => {
-                opcode_stream.push_opcode(
-                    arm_asm::Ldrb::new(dest_reg, MEMORY_MAP_BASE_ADDR_REGISTER)
-                        .with_mode(arm_asm::MemoryAccessMode::ShiftedRegister(
-                            DECODED_OP_REGISTER,
-                        ))
-                        .generate(),
-                );
-            }
-            mos6502::addressing_modes::OperandType::Value => {
-                opcode_stream
-                    .push_opcode(arm_asm::Mov::new(dest_reg, DECODED_OP_REGISTER).generate());
-            }
-            mos6502::addressing_modes::OperandType::None => {
-                unreachable!()
-            }
-        }
+        Self::wrap_and_keep_flags(
+            opcode_stream,
+            &[mos6502::Flags::C, mos6502::Flags::V],
+            |opcode_stream| {
+                match instruction.opcode.addressing_mode().operand_type() {
+                    mos6502::addressing_modes::OperandType::Memory => {
+                        opcode_stream.push_opcode(
+                            arm_asm::Ldrb::new(dest_reg, MEMORY_MAP_BASE_ADDR_REGISTER)
+                                .with_mode(arm_asm::MemoryAccessMode::ShiftedRegister(
+                                    DECODED_OP_REGISTER,
+                                ))
+                                .generate(),
+                        );
+                    }
+                    mos6502::addressing_modes::OperandType::Value => {
+                        opcode_stream.push_opcode(
+                            arm_asm::Mov::new(dest_reg, DECODED_OP_REGISTER).generate(),
+                        );
+                    }
+                    mos6502::addressing_modes::OperandType::None => {
+                        unreachable!()
+                    }
+                }
 
-        opcode_stream.push_opcode(arm_asm::SetF8::new(dest_reg).generate());
+                opcode_stream.push_opcode(arm_asm::SetF8::new(dest_reg).generate());
+            },
+        )
     }
 
     fn emit_store_instruction(

@@ -7,6 +7,14 @@ pub enum Error {
     UnknownOpCode,
 }
 
+#[derive(Debug)]
+pub enum Flags {
+    N,
+    Z,
+    V,
+    C,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub struct Instruction {
     pub opcode: opcode::OpCode,

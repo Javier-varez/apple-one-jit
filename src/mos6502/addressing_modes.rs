@@ -23,9 +23,9 @@ const INST_SIZE_MAP: [usize; 13] = [
     2_usize, // AddressingMode::AbsoluteYIndexed
     1_usize, // AddressingMode::Immediate
     0_usize, // AddressingMode::Implied
-    2_usize, // AddressingMode::Indirect
-    2_usize, // AddressingMode::XIndexedIndirect
-    2_usize, // AddressingMode::IndirectYIndexed
+    1_usize, // AddressingMode::Indirect
+    1_usize, // AddressingMode::XIndexedIndirect
+    1_usize, // AddressingMode::IndirectYIndexed
     1_usize, // AddressingMode::Relative
     1_usize, // AddressingMode::Zeropage
     1_usize, // AddressingMode::ZeropageXIndexed
