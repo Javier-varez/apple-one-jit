@@ -11,13 +11,34 @@ struct State {
     sp: u64,
     pc: u64,
     flags: Vec<char>,
-    memory: Option<Vec<u8>>,
+    // Map of base addr + data at addr
+    memory: Option<std::collections::HashMap<String, Vec<u8>>>,
 }
 
 #[derive(Debug, Deserialize)]
 struct Test {
     entry_state: State,
     exit_state: State,
+}
+
+fn build_memory(state: &State) -> Vec<u8> {
+    let mut data = vec![];
+    data.resize(0x1_0000, 0);
+
+    if let Some(memory) = &state.memory {
+        for (base, slice) in memory {
+            let base = base.parse::<u16>().unwrap();
+            let dest = data
+                .iter_mut()
+                .skip(base as usize)
+                .take(slice.iter().count());
+            for (dest, src) in dest.zip(slice.iter()) {
+                *dest = *src;
+            }
+        }
+    }
+
+    data
 }
 
 fn translate_flags(flags: &[char]) -> u64 {
@@ -62,19 +83,8 @@ fn run_test(test_name: &str, program: &[u8], tests_str: &str) {
             flags: translate_flags(&test.exit_state.flags),
         };
 
-        let mut entry_memory = if let Some(memory) = test.entry_state.memory {
-            memory
-        } else {
-            vec![]
-        };
-        entry_memory.resize(65536, 0);
-
-        let mut expected_memory = if let Some(memory) = test.exit_state.memory {
-            memory
-        } else {
-            vec![]
-        };
-        expected_memory.resize(65536, 0);
+        let mut entry_memory = build_memory(&test.entry_state);
+        let expected_memory = build_memory(&test.exit_state);
 
         compiler.translate_code(program).unwrap();
         unsafe { compiler.run(&mut cpu_state, &mut entry_memory) };

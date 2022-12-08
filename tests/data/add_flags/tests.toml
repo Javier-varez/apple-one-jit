@@ -1,11 +1,11 @@
 [carry-flag-is-set]
-entry_state = { accumulator = 1, x = 0, y = 0, sp = 0, pc = 0, flags = [], memory = [255] }
-exit_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 2, flags = ["C", "Z"], memory = [255] }
+entry_state = { accumulator = 1, x = 0, y = 0, sp = 0, pc = 0, flags = [], memory = { 0 = [255] } }
+exit_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 2, flags = ["C", "Z"], memory = { 0 = [255] } }
 
 [overflow-flag-is-set]
-entry_state = { accumulator = 0x80, x = 0, y = 0, sp = 0, pc = 0, flags = [], memory = [0x80] }
-exit_state = { accumulator = 0xffffff00, x = 0, y = 0, sp = 0, pc = 2, flags = ["C", "V", "Z"], memory = [0x80] }
+entry_state = { accumulator = 0x80, x = 0, y = 0, sp = 0, pc = 0, flags = [], memory = { 0 = [0x80] } }
+exit_state = { accumulator = 0xffffff00, x = 0, y = 0, sp = 0, pc = 2, flags = ["C", "V", "Z"], memory = { 0 = [0x80] } }
 
 [carry-is-added]
-entry_state = { accumulator = 0x7f, x = 0, y = 0, sp = 0, pc = 0, flags = ["C"], memory = [0] }
-exit_state = { accumulator = 0x80, x = 0, y = 0, sp = 0, pc = 2, flags = ["V", "N"], memory = [0] }
+entry_state = { accumulator = 0x7f, x = 0, y = 0, sp = 0, pc = 0, flags = ["C"] }
+exit_state = { accumulator = 0x80, x = 0, y = 0, sp = 0, pc = 2, flags = ["V", "N"] }

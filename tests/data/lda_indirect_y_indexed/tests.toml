@@ -1,7 +1,46 @@
+# Test with y == 0
 [y-zero]
-entry_state = { accumulator = 0, x = 2, y = 0, sp = 0, pc = 0, flags = [], memory = [0, 0, 3, 0, 0, 0x02, 0x00] }
-exit_state = { accumulator = 3, x = 2, y = 0, sp = 0, pc = 2, flags = [], memory = [0, 0, 3, 0, 0, 0x02, 0x00] }
+[y-zero.entry_state]
+accumulator = 0
+x = 2
+y = 0
+sp = 0
+pc = 0
+flags = []
+[y-zero.entry_state.memory]
+2 = [3]
+5 = [2]
 
+[y-zero.exit_state]
+accumulator = 3
+x = 2
+y = 0
+sp = 0
+pc = 2
+flags = []
+[y-zero.exit_state.memory]
+2 = [3]
+5 = [2]
+
+# Test with y != 0
 [y-not-zero]
-entry_state = { accumulator = 0, x = 2, y = 2, sp = 0, pc = 0, flags = [], memory = [0, 0, 3, 0, 5, 0x02, 0x00] }
-exit_state = { accumulator = 5, x = 2, y = 2, sp = 0, pc = 2, flags = [], memory = [0, 0, 3, 0, 5, 0x02, 0x00] }
+
+[y-not-zero.entry_state]
+accumulator = 0
+x = 2
+y = 2
+sp = 0
+pc = 0
+flags = []
+[y-not-zero.entry_state.memory]
+2 = [3, 0, 5, 2]
+
+[y-not-zero.exit_state]
+accumulator = 5
+x = 2
+y = 2
+sp = 0
+pc = 2
+flags = []
+[y-not-zero.exit_state.memory]
+2 = [3, 0, 5, 2]

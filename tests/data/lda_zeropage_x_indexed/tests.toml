@@ -1,7 +1,38 @@
 [simple]
-entry_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0, flags = [], memory = [0, 0, 0, 0, 0, 0x74] }
-exit_state = { accumulator = 0x74, x = 0, y = 0, sp = 0, pc = 2, flags = [], memory = [0, 0, 0, 0, 0, 0x74] }
+
+[simple.entry_state]
+accumulator = 0
+x = 0
+y = 0
+sp = 0
+pc = 0
+flags = []
+memory = { 5 = [0x74] }
+
+[simple.exit_state]
+accumulator = 0x74
+x = 0
+y = 0
+sp = 0
+pc = 2
+flags = []
+memory = { 5 = [0x74] }
 
 [larger-x]
-entry_state = { accumulator = 0, x = 2, y = 0, sp = 0, pc = 0, flags = [], memory = [0, 0, 0, 0, 0, 0, 0, 0x84] }
-exit_state = { accumulator = 0x84, x = 2, y = 0, sp = 0, pc = 2, flags = ["N"], memory = [0, 0, 0, 0, 0, 0, 0, 0x84] }
+[larger-x.entry_state]
+accumulator = 0
+x = 2
+y = 0
+sp = 0
+pc = 0
+flags = []
+memory = { 7 = [0x84] }
+
+[larger-x.exit_state]
+accumulator = 0x84
+x = 2
+y = 0
+sp = 0
+pc = 2
+flags = ['N']
+memory = { 7 = [0x84] }

@@ -1,7 +1,39 @@
 [x-zero]
-entry_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0, flags = [], memory = [0, 0, 3, 0, 0, 0x02, 0x00] }
-exit_state = { accumulator = 3, x = 0, y = 0, sp = 0, pc = 2, flags = [], memory = [0, 0, 3, 0, 0, 0x02, 0x00] }
+
+[x-zero.entry_state]
+accumulator = 0
+x = 0
+y = 0
+sp = 0
+pc = 0
+flags = []
+memory = { 2 = [3], 5 = [2] }
+
+[x-zero.exit_state]
+accumulator = 3
+x = 0
+y = 0
+sp = 0
+pc = 2
+flags = []
+memory = { 2 = [3], 5 = [2] }
 
 [x-not-zero]
-entry_state = { accumulator = 0, x = 2, y = 0, sp = 0, pc = 0, flags = [], memory = [0, 0, 3, 0, 0, 0, 0, 0x02, 0x00] }
-exit_state = { accumulator = 3, x = 2, y = 0, sp = 0, pc = 2, flags = [], memory = [0, 0, 3, 0, 0, 0, 0, 0x02, 0x00] }
+
+[x-not-zero.entry_state]
+accumulator = 0
+x = 2
+y = 0
+sp = 0
+pc = 0
+flags = []
+memory = { 2 = [3], 7 = [2] }
+
+[x-not-zero.exit_state]
+accumulator = 3
+x = 2
+y = 0
+sp = 0
+pc = 2
+flags = []
+memory = { 2 = [3], 7 = [2] }
