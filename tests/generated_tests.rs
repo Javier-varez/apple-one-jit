@@ -21,13 +21,21 @@ struct Test {
     exit_state: State,
 }
 
+fn parse_u16(string: &str) -> u16 {
+    if string.starts_with("0x") {
+        u16::from_str_radix(string.trim_start_matches("0x"), 16).unwrap()
+    } else {
+        u16::from_str_radix(string, 10).unwrap()
+    }
+}
+
 fn build_memory(state: &State) -> Vec<u8> {
     let mut data = vec![];
     data.resize(0x1_0000, 0);
 
     if let Some(memory) = &state.memory {
         for (base, slice) in memory {
-            let base = base.parse::<u16>().unwrap();
+            let base = parse_u16(base);
             let dest = data
                 .iter_mut()
                 .skip(base as usize)
