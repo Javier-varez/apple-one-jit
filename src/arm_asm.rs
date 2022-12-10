@@ -27,7 +27,7 @@ impl<const BITS: u8> Immediate<BITS> {
     pub fn new(val: u64) -> Self {
         let mask = ((1u128 << BITS) - 1) as u64;
         assert!((val & !mask) == 0);
-        Self(val)
+        Self(val & mask)
     }
 }
 
@@ -42,7 +42,7 @@ impl<const BITS: u8> SignedImmediate<BITS> {
             0
         };
         assert!(upper_bits == expected_upper_bits);
-        Self(val)
+        Self(val & mask)
     }
 }
 
