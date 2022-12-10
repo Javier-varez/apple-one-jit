@@ -144,8 +144,13 @@ impl Compiler {
                 };
 
                 opcode_stream.push_opcode(
-                    arm_asm::Add::new(DECODED_OP_REGISTER, X_REGISTER)
+                    arm_asm::Movz::new(SCRATCH_REGISTER)
                         .with_immediate(Immediate::new(value as u64))
+                        .generate(),
+                );
+                opcode_stream.push_opcode(
+                    arm_asm::Add::new(DECODED_OP_REGISTER, X_REGISTER)
+                        .with_shifted_reg(SCRATCH_REGISTER)
                         .generate(),
                 );
             }
@@ -155,8 +160,13 @@ impl Compiler {
                 };
 
                 opcode_stream.push_opcode(
-                    arm_asm::Add::new(DECODED_OP_REGISTER, Y_REGISTER)
+                    arm_asm::Movz::new(SCRATCH_REGISTER)
                         .with_immediate(Immediate::new(value as u64))
+                        .generate(),
+                );
+                opcode_stream.push_opcode(
+                    arm_asm::Add::new(DECODED_OP_REGISTER, Y_REGISTER)
+                        .with_shifted_reg(SCRATCH_REGISTER)
                         .generate(),
                 );
             }
