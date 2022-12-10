@@ -49,6 +49,17 @@ impl<'a> OpCodeStream<'a> {
     pub fn patch_opcode(&mut self, marker: &Marker, opcode: OpCode) {
         self.data[marker.index as usize].write(opcode);
     }
+
+    pub fn to_file(&self, path: &std::path::Path) {
+        let data: Vec<u8> = self.data[..self.index]
+            .iter()
+            .map(|value|
+                // At this point the value is initialized
+                unsafe { value.assume_init_ref().value().to_le_bytes() })
+            .flatten()
+            .collect();
+        std::fs::write(path, data).unwrap();
+    }
 }
 
 pub struct JitPage {
