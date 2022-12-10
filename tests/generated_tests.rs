@@ -36,10 +36,7 @@ fn build_memory(state: &State) -> Vec<u8> {
     if let Some(memory) = &state.memory {
         for (base, slice) in memory {
             let base = parse_u16(base);
-            let dest = data
-                .iter_mut()
-                .skip(base as usize)
-                .take(slice.iter().count());
+            let dest = data.iter_mut().skip(base as usize);
             for (dest, src) in dest.zip(slice.iter()) {
                 *dest = *src;
             }

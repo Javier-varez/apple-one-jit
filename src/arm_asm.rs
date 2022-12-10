@@ -17,48 +17,32 @@ pub enum OpSize {
 }
 
 /// Immediate argument for a machine code instruction
-pub struct Immediate(u64);
+pub struct Immediate<const BITS: u8>(u64);
 
 /// Signed immediate argument for a machine code instruction
-pub struct SignedImmediate(i64);
+pub struct SignedImmediate<const BITS: u8>(i64);
 
-impl Immediate {
+impl<const BITS: u8> Immediate<BITS> {
     /// Constructs a new immediate from the given value
     pub fn new(val: u64) -> Self {
+        let mask = ((1u128 << BITS) - 1) as u64;
+        assert!((val & !mask) == 0);
         Self(val)
-    }
-
-    fn validate(&self, num_bits: usize) -> Result<u64, ()> {
-        let mask = (1 << num_bits) - 1;
-
-        if (self.0 & !mask) == 0 {
-            Ok(self.0 & mask)
-        } else {
-            Err(())
-        }
     }
 }
 
-impl SignedImmediate {
+impl<const BITS: u8> SignedImmediate<BITS> {
     /// Constructs a new immediate from the given value
     pub fn new(val: i64) -> Self {
-        Self(val)
-    }
-
-    fn validate(&self, num_bits: usize) -> Result<i64, ()> {
-        let mask = (1 << num_bits) - 1;
-        let sign_bit_offset = num_bits - 1;
-        let expected_bits = if ((self.0 >> sign_bit_offset) & 1) == 1 {
+        let mask = ((1u128 << BITS) - 1) as i64;
+        let upper_bits = val & !mask;
+        let expected_upper_bits = if (val & (1 << (BITS - 1))) != 0 {
             !mask
         } else {
             0
         };
-
-        if (self.0 & !mask) == expected_bits {
-            Ok(self.0 & mask)
-        } else {
-            Err(())
-        }
+        assert!(upper_bits == expected_upper_bits);
+        Self(val)
     }
 }
 
@@ -227,7 +211,7 @@ mod branch {
     ///         .with_immediate(SignedImmediate::new(-5)).link().generate();
     /// ```
     pub struct Branch<T: operand::OperandType, const COND: bool> {
-        immediate: Option<SignedImmediate>,
+        immediate: Option<SignedImmediate<26>>,
         condition: Option<Condition>,
         link: bool,
         _pd: PhantomData<T>,
@@ -258,7 +242,7 @@ mod branch {
         /// Relative branch to the PC, offset by the value of the immediate
         pub fn with_immediate(
             self,
-            imm: SignedImmediate,
+            imm: SignedImmediate<26>,
         ) -> Branch<operand::ImmediateOperand, false> {
             Branch::<operand::ImmediateOperand, false> {
                 immediate: Some(imm),
@@ -381,7 +365,7 @@ mod arithmetic {
     }
 
     struct ImmediateArgs {
-        immediate: Immediate,
+        immediate: Immediate<12>,
         shift: bool,
     }
 
@@ -431,7 +415,10 @@ mod arithmetic {
         }
 
         /// Selects the immediate operation type
-        pub fn with_immediate(self, imm: Immediate) -> ArithmeticOp<OP, operand::ImmediateOperand> {
+        pub fn with_immediate(
+            self,
+            imm: Immediate<12>,
+        ) -> ArithmeticOp<OP, operand::ImmediateOperand> {
             ArithmeticOp::<OP, operand::ImmediateOperand> {
                 source_reg: self.source_reg,
                 dest_reg: self.dest_reg,
@@ -650,7 +637,7 @@ mod logical_op {
     pub struct LogicalOperation<const OP: u8, ArgumentType: operand::OperandType> {
         source_reg: Register,
         dest_reg: Register,
-        immediate: Option<Immediate>,
+        immediate: Option<Immediate<64>>,
         register: Option<RegisterArgs>,
         _pd: PhantomData<ArgumentType>,
     }
@@ -670,7 +657,7 @@ mod logical_op {
         /// Creates a logical operation with the given intermediate as the second operand
         pub fn with_immediate(
             self,
-            imm: Immediate,
+            imm: Immediate<64>,
         ) -> LogicalOperation<OP, operand::ImmediateOperand> {
             LogicalOperation::<OP, operand::ImmediateOperand> {
                 source_reg: self.source_reg,
@@ -864,7 +851,7 @@ mod mov {
 
     pub struct MovOperation<const OP: u8, ArgumentType: operand::OperandType> {
         dest_reg: Register,
-        immediate: Option<Immediate>,
+        immediate: Option<Immediate<16>>,
         shift: MovShift,
         _pd: PhantomData<ArgumentType>,
     }
@@ -881,7 +868,10 @@ mod mov {
         }
 
         /// Creates a mov operation with the given intermediate as the second operand
-        pub fn with_immediate(self, imm: Immediate) -> MovOperation<OP, operand::ImmediateOperand> {
+        pub fn with_immediate(
+            self,
+            imm: Immediate<16>,
+        ) -> MovOperation<OP, operand::ImmediateOperand> {
             MovOperation::<OP, operand::ImmediateOperand> {
                 dest_reg: self.dest_reg,
                 immediate: Some(imm),
@@ -978,9 +968,9 @@ mod memory_op {
     use super::*;
 
     pub enum MemoryAccessMode {
-        PostIndexImmediate(SignedImmediate),
-        PreIndexImmediate(SignedImmediate),
-        UnsignedOffsetImmediate(Immediate),
+        PostIndexImmediate(SignedImmediate<9>),
+        PreIndexImmediate(SignedImmediate<9>),
+        UnsignedOffsetImmediate(Immediate<12>),
         ShiftedRegister(Register),
     }
 
@@ -990,23 +980,17 @@ mod memory_op {
                 MemoryAccessMode::PostIndexImmediate(val) => {
                     const BASE: u32 = 0x3800_0000 | (1 << 10);
                     const IMM_OFFSET: usize = 12;
-                    const IMM_NUM_BITS: usize = 9;
-                    let value = val.validate(IMM_NUM_BITS).unwrap() as u32;
-                    BASE | (value << IMM_OFFSET)
+                    BASE | ((val.0 as u32) << IMM_OFFSET)
                 }
                 MemoryAccessMode::PreIndexImmediate(val) => {
                     const BASE: u32 = 0x3800_0000 | (3 << 10);
                     const IMM_OFFSET: usize = 12;
-                    const IMM_NUM_BITS: usize = 9;
-                    let value = val.validate(IMM_NUM_BITS).unwrap() as u32;
-                    BASE | (value << IMM_OFFSET)
+                    BASE | ((val.0 as u32) << IMM_OFFSET)
                 }
                 MemoryAccessMode::UnsignedOffsetImmediate(val) => {
                     const BASE: u32 = 0x3900_0000;
                     const IMM_OFFSET: usize = 10;
-                    const IMM_NUM_BITS: usize = 12;
-                    let value = val.validate(IMM_NUM_BITS).unwrap() as u32;
-                    BASE | (value << IMM_OFFSET)
+                    BASE | ((val.0 as u32) << IMM_OFFSET)
                 }
                 MemoryAccessMode::ShiftedRegister(val) => {
                     const BASE: u32 = 0x3800_0000 | (1 << 11) | (1 << 21) | (3 << 13);
