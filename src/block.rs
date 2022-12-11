@@ -62,11 +62,11 @@ impl<'a> OpCodeStream<'a> {
     }
 }
 
-pub struct JitPage {
+pub struct Block {
     allocation: Allocation,
 }
 
-impl JitPage {
+impl Block {
     pub fn allocate(size: usize) -> Result<Self, region::Error> {
         let allocation = alloc(size, Protection::READ_WRITE)?;
         Ok(Self { allocation })
@@ -138,9 +138,9 @@ mod test {
 
     #[test]
     fn test_add_immediate() {
-        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+        let mut block = Block::allocate(page::size()).unwrap();
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             opcode_stream.push_opcode(
                 Add::new(Register::X0, Register::X0)
                     .with_immediate(Immediate::new(24))
@@ -149,15 +149,15 @@ mod test {
             opcode_stream.push_opcode(Ret::new().generate());
         });
 
-        let val = unsafe { invoke!(jit_page, extern "C" fn(u64) -> u64, 10) };
+        let val = unsafe { invoke!(block, extern "C" fn(u64) -> u64, 10) };
         assert_eq!(val, 34);
     }
 
     #[test]
     fn test_add_shifted_immediate() {
-        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+        let mut block = Block::allocate(page::size()).unwrap();
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             opcode_stream.push_opcode(
                 Add::new(Register::X0, Register::X0)
                     .with_immediate(Immediate::new(0x12))
@@ -167,15 +167,15 @@ mod test {
             opcode_stream.push_opcode(Ret::new().generate());
         });
 
-        let val = unsafe { invoke!(jit_page, extern "C" fn(u64) -> u64, 0x123) };
+        let val = unsafe { invoke!(block, extern "C" fn(u64) -> u64, 0x123) };
         assert_eq!(val, 0x12123);
     }
 
     #[test]
     fn test_sub_immediate() {
-        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+        let mut block = Block::allocate(page::size()).unwrap();
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             opcode_stream.push_opcode(
                 Sub::new(Register::X0, Register::X0)
                     .with_immediate(Immediate::new(24))
@@ -184,15 +184,15 @@ mod test {
             opcode_stream.push_opcode(Ret::new().generate());
         });
 
-        let val = unsafe { invoke!(jit_page, extern "C" fn(u64) -> u64, 34) };
+        let val = unsafe { invoke!(block, extern "C" fn(u64) -> u64, 34) };
         assert_eq!(val, 10);
     }
 
     #[test]
     fn test_sub_shifted_immediate() {
-        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+        let mut block = Block::allocate(page::size()).unwrap();
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             opcode_stream.push_opcode(
                 Sub::new(Register::X0, Register::X0)
                     .with_immediate(Immediate::new(0x1))
@@ -202,15 +202,15 @@ mod test {
             opcode_stream.push_opcode(Ret::new().generate());
         });
 
-        let val = unsafe { invoke!(jit_page, extern "C" fn(u64) -> u64, 0x1234) };
+        let val = unsafe { invoke!(block, extern "C" fn(u64) -> u64, 0x1234) };
         assert_eq!(val, 0x234);
     }
 
     #[test]
     fn test_add_register_not_shifted() {
-        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+        let mut block = Block::allocate(page::size()).unwrap();
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             opcode_stream.push_opcode(
                 Add::new(Register::X0, Register::X0)
                     .with_shifted_reg(Register::X1)
@@ -219,15 +219,15 @@ mod test {
             opcode_stream.push_opcode(Ret::new().generate());
         });
 
-        let val = unsafe { invoke!(jit_page, extern "C" fn(u64, u64) -> u64, 0x1234, 0x10001) };
+        let val = unsafe { invoke!(block, extern "C" fn(u64, u64) -> u64, 0x1234, 0x10001) };
         assert_eq!(val, 0x11235);
     }
 
     #[test]
     fn test_sub_register_not_shifted() {
-        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+        let mut block = Block::allocate(page::size()).unwrap();
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             opcode_stream.push_opcode(
                 Sub::new(Register::X0, Register::X0)
                     .with_shifted_reg(Register::X1)
@@ -236,15 +236,15 @@ mod test {
             opcode_stream.push_opcode(Ret::new().generate());
         });
 
-        let val = unsafe { invoke!(jit_page, extern "C" fn(u64, u64) -> u64, 1234, 1230) };
+        let val = unsafe { invoke!(block, extern "C" fn(u64, u64) -> u64, 1234, 1230) };
         assert_eq!(val, 4);
     }
 
     #[test]
     fn test_add_register_shifted_left() {
-        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+        let mut block = Block::allocate(page::size()).unwrap();
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             opcode_stream.push_opcode(
                 Add::new(Register::X0, Register::X0)
                     .with_shifted_reg(Register::X1)
@@ -254,15 +254,15 @@ mod test {
             opcode_stream.push_opcode(Ret::new().generate());
         });
 
-        let val = unsafe { invoke!(jit_page, extern "C" fn(u64, u64) -> u64, 0x12, 0x23) };
+        let val = unsafe { invoke!(block, extern "C" fn(u64, u64) -> u64, 0x12, 0x23) };
         assert_eq!(val, 0x2312);
     }
 
     #[test]
     fn test_sub_register_shifted_left() {
-        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+        let mut block = Block::allocate(page::size()).unwrap();
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             opcode_stream.push_opcode(
                 Sub::new(Register::X0, Register::X0)
                     .with_shifted_reg(Register::X1)
@@ -272,15 +272,15 @@ mod test {
             opcode_stream.push_opcode(Ret::new().generate());
         });
 
-        let val = unsafe { invoke!(jit_page, extern "C" fn(u64, u64) -> u64, 0x2333, 0x23) };
+        let val = unsafe { invoke!(block, extern "C" fn(u64, u64) -> u64, 0x2333, 0x23) };
         assert_eq!(val, 0x33);
     }
 
     #[test]
     fn test_or_immediate() {
-        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+        let mut block = Block::allocate(page::size()).unwrap();
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             opcode_stream.push_opcode(
                 Or::new(Register::X0, Register::X0)
                     .with_immediate(Immediate::new(0x1111_1111_1111_1111u64))
@@ -289,15 +289,15 @@ mod test {
             opcode_stream.push_opcode(Ret::new().generate());
         });
 
-        let val = unsafe { invoke!(jit_page, extern "C" fn(u64) -> u64, 0xAAAA_0000_FFFF_5555) };
+        let val = unsafe { invoke!(block, extern "C" fn(u64) -> u64, 0xAAAA_0000_FFFF_5555) };
         assert_eq!(val, 0xBBBB_1111_FFFF_5555);
     }
 
     #[test]
     fn test_xor_immediate() {
-        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+        let mut block = Block::allocate(page::size()).unwrap();
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             opcode_stream.push_opcode(
                 Xor::new(Register::X0, Register::X0)
                     .with_immediate(Immediate::new(0xdddd_dddd_dddd_ddddu64))
@@ -306,15 +306,15 @@ mod test {
             opcode_stream.push_opcode(Ret::new().generate());
         });
 
-        let val = unsafe { invoke!(jit_page, extern "C" fn(u64) -> u64, 0xAAAA_0000_FFFF_5555) };
+        let val = unsafe { invoke!(block, extern "C" fn(u64) -> u64, 0xAAAA_0000_FFFF_5555) };
         assert_eq!(val, 0x7777_dddd_2222_8888);
     }
 
     #[test]
     fn test_and_immediate() {
-        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+        let mut block = Block::allocate(page::size()).unwrap();
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             opcode_stream.push_opcode(
                 And::new(Register::X0, Register::X0)
                     .with_immediate(Immediate::new(0xff00_ff00_ff00_ff00u64))
@@ -323,15 +323,15 @@ mod test {
             opcode_stream.push_opcode(Ret::new().generate());
         });
 
-        let val = unsafe { invoke!(jit_page, extern "C" fn(u64) -> u64, 0xAAAA_0000_FFFF_5555) };
+        let val = unsafe { invoke!(block, extern "C" fn(u64) -> u64, 0xAAAA_0000_FFFF_5555) };
         assert_eq!(val, 0xaa00_0000_ff00_5500);
     }
 
     #[test]
     fn test_or_register() {
-        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+        let mut block = Block::allocate(page::size()).unwrap();
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             opcode_stream.push_opcode(
                 Or::new(Register::X0, Register::X0)
                     .with_shifted_reg(Register::X1)
@@ -343,7 +343,7 @@ mod test {
 
         let val = unsafe {
             invoke!(
-                jit_page,
+                block,
                 extern "C" fn(u64, u64) -> u64,
                 0xAAAA_0000_FFFF_5555,
                 0x5555_0000_AAAA_FFFF
@@ -354,9 +354,9 @@ mod test {
 
     #[test]
     fn test_and_register() {
-        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+        let mut block = Block::allocate(page::size()).unwrap();
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             opcode_stream.push_opcode(
                 And::new(Register::X0, Register::X0)
                     .with_shifted_reg(Register::X1)
@@ -368,7 +368,7 @@ mod test {
 
         let val = unsafe {
             invoke!(
-                jit_page,
+                block,
                 extern "C" fn(u64, u64) -> u64,
                 0xAAAA_0000_FFFF_5555,
                 0x5555_0000_AAAA_FFFF
@@ -379,9 +379,9 @@ mod test {
 
     #[test]
     fn test_xor_register() {
-        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+        let mut block = Block::allocate(page::size()).unwrap();
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             opcode_stream.push_opcode(
                 Xor::new(Register::X0, Register::X0)
                     .with_shifted_reg(Register::X1)
@@ -393,7 +393,7 @@ mod test {
 
         let val = unsafe {
             invoke!(
-                jit_page,
+                block,
                 extern "C" fn(u64, u64) -> u64,
                 0xAAAA_0000_FFFF_5555,
                 0x5555_0000_AAAA_FFFF
@@ -404,9 +404,9 @@ mod test {
 
     #[test]
     fn test_movz() {
-        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+        let mut block = Block::allocate(page::size()).unwrap();
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             opcode_stream.push_opcode(
                 Movz::new(Register::X0)
                     .with_immediate(Immediate::new(0x1234))
@@ -415,15 +415,15 @@ mod test {
             opcode_stream.push_opcode(Ret::new().generate());
         });
 
-        let val = unsafe { invoke!(jit_page, extern "C" fn() -> u64) };
+        let val = unsafe { invoke!(block, extern "C" fn() -> u64) };
         assert_eq!(val, 0x1234);
     }
 
     #[test]
     fn test_movk() {
-        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+        let mut block = Block::allocate(page::size()).unwrap();
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             opcode_stream.push_opcode(
                 Movz::new(Register::X0)
                     .with_immediate(Immediate::new(0x1234))
@@ -450,15 +450,15 @@ mod test {
             opcode_stream.push_opcode(Ret::new().generate());
         });
 
-        let val = unsafe { invoke!(jit_page, extern "C" fn() -> u64) };
+        let val = unsafe { invoke!(block, extern "C" fn() -> u64) };
         assert_eq!(val, 0x55AAFFFF56781234);
     }
 
     #[test]
     fn test_movn() {
-        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+        let mut block = Block::allocate(page::size()).unwrap();
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             opcode_stream.push_opcode(
                 Movn::new(Register::X0)
                     .with_immediate(Immediate::new(0xAA55))
@@ -468,28 +468,28 @@ mod test {
             opcode_stream.push_opcode(Ret::new().generate());
         });
 
-        let val = unsafe { invoke!(jit_page, extern "C" fn() -> u64) };
+        let val = unsafe { invoke!(block, extern "C" fn() -> u64) };
         assert_eq!(val, 0xFFFFFFFFFFFF55AA);
     }
 
     #[test]
     fn test_mov_register() {
-        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+        let mut block = Block::allocate(page::size()).unwrap();
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             opcode_stream.push_opcode(Mov::new(Register::X0, Register::X1).generate());
             opcode_stream.push_opcode(Ret::new().generate());
         });
 
-        let val = unsafe { invoke!(jit_page, extern "C" fn(u64, u64) -> u64, 123, 234) };
+        let val = unsafe { invoke!(block, extern "C" fn(u64, u64) -> u64, 123, 234) };
         assert_eq!(val, 234);
     }
 
     #[test]
     fn test_branch() {
-        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+        let mut block = Block::allocate(page::size()).unwrap();
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             opcode_stream.push_opcode(
                 Movz::new(Register::X0)
                     .with_immediate(Immediate::new(0xFFFF))
@@ -516,15 +516,15 @@ mod test {
             );
         });
 
-        let val = unsafe { invoke!(jit_page, extern "C" fn() -> u64) };
+        let val = unsafe { invoke!(block, extern "C" fn() -> u64) };
         assert_eq!(val, 0xFFFF);
     }
 
     #[test]
     fn test_conditional_branch() {
-        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+        let mut block = Block::allocate(page::size()).unwrap();
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             opcode_stream.push_opcode(
                 Add::new(Register::X2, Register::X0)
                     .with_immediate(Immediate::new(0))
@@ -578,18 +578,18 @@ mod test {
             );
         });
 
-        let val = unsafe { invoke!(jit_page, extern "C" fn(u64, u64) -> u64, 4, 4) };
+        let val = unsafe { invoke!(block, extern "C" fn(u64, u64) -> u64, 4, 4) };
         assert_eq!(val, 16);
 
-        let val = unsafe { invoke!(jit_page, extern "C" fn(u64, u64) -> u64, 128, 128) };
+        let val = unsafe { invoke!(block, extern "C" fn(u64, u64) -> u64, 128, 128) };
         assert_eq!(val, 16384);
     }
 
     #[test]
     fn test_str_instruction() {
-        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+        let mut block = Block::allocate(page::size()).unwrap();
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             // Store the value in X0 in [X1]
             opcode_stream.push_opcode(
                 Strd::new(Register::X0, Register::X1)
@@ -604,7 +604,7 @@ mod test {
 
         unsafe {
             invoke!(
-                jit_page,
+                block,
                 extern "C" fn(u64, *mut u64),
                 input,
                 &mut output as *mut u64
@@ -616,9 +616,9 @@ mod test {
 
     #[test]
     fn test_ldr_instruction() {
-        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+        let mut block = Block::allocate(page::size()).unwrap();
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             // Store the address in X0 in [X0]
             opcode_stream.push_opcode(
                 Ldrd::new(Register::X0, Register::X0)
@@ -631,7 +631,7 @@ mod test {
         let input = 0x1234_5678_9012_3456u64;
         let val = unsafe {
             invoke!(
-                jit_page,
+                block,
                 extern "C" fn(*const u64) -> u64,
                 &input as *const u64
             )
@@ -641,9 +641,9 @@ mod test {
 
     #[test]
     fn test_str_with_imm_offset_instruction() {
-        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+        let mut block = Block::allocate(page::size()).unwrap();
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             // Store the value in X0 in [X1]
             opcode_stream.push_opcode(
                 Strd::new(Register::X0, Register::X1)
@@ -658,7 +658,7 @@ mod test {
 
         unsafe {
             invoke!(
-                jit_page,
+                block,
                 extern "C" fn(u64, *mut u64),
                 input,
                 &mut output[0] as *mut u64
@@ -671,9 +671,9 @@ mod test {
 
     #[test]
     fn test_ldr_with_imm_offset_instruction() {
-        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+        let mut block = Block::allocate(page::size()).unwrap();
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             // Store the value in X0 in [X1]
             opcode_stream.push_opcode(
                 Ldrd::new(Register::X0, Register::X0)
@@ -687,7 +687,7 @@ mod test {
 
         let val = unsafe {
             invoke!(
-                jit_page,
+                block,
                 extern "C" fn(*const u64) -> u64,
                 &input[0] as *const u64
             )
@@ -698,9 +698,9 @@ mod test {
 
     #[test]
     fn test_ldr_with_register_offset_instr() {
-        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+        let mut block = Block::allocate(page::size()).unwrap();
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             // Store the value in X0 in [X1]
             opcode_stream.push_opcode(
                 Ldrd::new(Register::X0, Register::X0)
@@ -714,7 +714,7 @@ mod test {
 
         let val = unsafe {
             invoke!(
-                jit_page,
+                block,
                 extern "C" fn(*const u64, u64) -> u64,
                 &input[0] as *const u64,
                 0
@@ -725,7 +725,7 @@ mod test {
 
         let val = unsafe {
             invoke!(
-                jit_page,
+                block,
                 extern "C" fn(*const u64, u64) -> u64,
                 &input[0] as *const u64,
                 8
@@ -737,9 +737,9 @@ mod test {
 
     #[test]
     fn test_str_with_register_offset_instr() {
-        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+        let mut block = Block::allocate(page::size()).unwrap();
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             // Store the value in X0 in [X1]
             opcode_stream.push_opcode(
                 Strd::new(Register::X2, Register::X0)
@@ -753,7 +753,7 @@ mod test {
 
         unsafe {
             invoke!(
-                jit_page,
+                block,
                 extern "C" fn(*mut u64, usize, u64),
                 &mut output[0] as *mut u64,
                 0,
@@ -766,7 +766,7 @@ mod test {
 
         unsafe {
             invoke!(
-                jit_page,
+                block,
                 extern "C" fn(*mut u64, usize, u64),
                 &mut output[0] as *mut u64,
                 8,
@@ -779,34 +779,34 @@ mod test {
 
     #[test]
     fn test_sign_extend() {
-        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+        let mut block = Block::allocate(page::size()).unwrap();
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             // Sign extend byte on x0
             opcode_stream.push_opcode(Sxtb::new(Register::X0, Register::X0).generate());
             opcode_stream.push_opcode(Ret::new().generate());
         });
 
-        let value = unsafe { invoke!(jit_page, extern "C" fn(u8) -> u32, 0x84) };
+        let value = unsafe { invoke!(block, extern "C" fn(u8) -> u32, 0x84) };
         assert_eq!(value, 0xffffff84);
-        let value = unsafe { invoke!(jit_page, extern "C" fn(u8) -> u32, 0x73) };
+        let value = unsafe { invoke!(block, extern "C" fn(u8) -> u32, 0x73) };
         assert_eq!(value, 0x73);
     }
 
     #[test]
     fn test_set_get_flags() {
-        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+        let mut block = Block::allocate(page::size()).unwrap();
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             opcode_stream.push_opcode(Msr::new(NZCV, Register::X0).generate());
             opcode_stream.push_opcode(Mrs::new(Register::X0, NZCV).generate());
             opcode_stream.push_opcode(Ret::new().generate());
         });
 
-        let value = unsafe { invoke!(jit_page, extern "C" fn(u64) -> u64, 0xFFFFFFFFFFFFFFF) };
+        let value = unsafe { invoke!(block, extern "C" fn(u64) -> u64, 0xFFFFFFFFFFFFFFF) };
         assert_eq!(value, 0xF0000000);
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             opcode_stream.push_opcode(
                 Movz::new(Register::X1)
                     .with_immediate(Immediate::new(0x00))
@@ -821,29 +821,26 @@ mod test {
         const N: u64 = 0x80000000;
         const Z: u64 = 0x40000000;
         const V: u64 = 0x10000000;
+        assert_eq!(unsafe { invoke!(block, extern "C" fn(u32) -> u64, 0) }, Z);
         assert_eq!(
-            unsafe { invoke!(jit_page, extern "C" fn(u32) -> u64, 0) },
-            Z
-        );
-        assert_eq!(
-            unsafe { invoke!(jit_page, extern "C" fn(u32) -> u64, 0x80) },
+            unsafe { invoke!(block, extern "C" fn(u32) -> u64, 0x80) },
             V | N
         );
         assert_eq!(
-            unsafe { invoke!(jit_page, extern "C" fn(u32) -> u64, 0xffffff80) },
+            unsafe { invoke!(block, extern "C" fn(u32) -> u64, 0xffffff80) },
             N
         );
         assert_eq!(
-            unsafe { invoke!(jit_page, extern "C" fn(u32) -> u64, 0xffffff7f) },
+            unsafe { invoke!(block, extern "C" fn(u32) -> u64, 0xffffff7f) },
             V
         );
     }
 
     #[test]
     fn test_add_with_carry() {
-        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+        let mut block = Block::allocate(page::size()).unwrap();
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             opcode_stream.push_opcode(Msr::new(NZCV, Register::X2).generate());
             opcode_stream
                 .push_opcode(Adc::new(Register::X0, Register::X0, Register::X1).generate());
@@ -853,27 +850,19 @@ mod test {
         const C: u64 = 0x20000000;
         const NO_FLAGS: u64 = 0x00000000;
         assert_eq!(
-            unsafe { invoke!(jit_page, extern "C" fn(u64, u64, u64) -> u64, 12, 4, C) },
+            unsafe { invoke!(block, extern "C" fn(u64, u64, u64) -> u64, 12, 4, C) },
             17
         );
 
         assert_eq!(
-            unsafe {
-                invoke!(
-                    jit_page,
-                    extern "C" fn(u64, u64, u64) -> u64,
-                    12,
-                    4,
-                    NO_FLAGS
-                )
-            },
+            unsafe { invoke!(block, extern "C" fn(u64, u64, u64) -> u64, 12, 4, NO_FLAGS) },
             16
         );
 
         assert_eq!(
             unsafe {
                 invoke!(
-                    jit_page,
+                    block,
                     extern "C" fn(u64, u64, u64) -> u64,
                     0x7FFF_FFFF_FFFF_FFFF,
                     4,
@@ -886,7 +875,7 @@ mod test {
         assert_eq!(
             unsafe {
                 invoke!(
-                    jit_page,
+                    block,
                     extern "C" fn(u64, u64, u64) -> u64,
                     0xFFFF_FFFF_FFFF_FFFF,
                     4,
@@ -899,9 +888,9 @@ mod test {
 
     #[test]
     fn test_add_with_carry_32_bit() {
-        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+        let mut block = Block::allocate(page::size()).unwrap();
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             opcode_stream.push_opcode(Msr::new(NZCV, Register::X2).generate());
             opcode_stream.push_opcode(
                 Adc::new(Register::X0, Register::X0, Register::X1)
@@ -914,27 +903,19 @@ mod test {
         const C: u64 = 0x20000000;
         const NO_FLAGS: u64 = 0x00000000;
         assert_eq!(
-            unsafe { invoke!(jit_page, extern "C" fn(u64, u64, u64) -> u64, 12, 4, C) },
+            unsafe { invoke!(block, extern "C" fn(u64, u64, u64) -> u64, 12, 4, C) },
             17
         );
 
         assert_eq!(
-            unsafe {
-                invoke!(
-                    jit_page,
-                    extern "C" fn(u64, u64, u64) -> u64,
-                    12,
-                    4,
-                    NO_FLAGS
-                )
-            },
+            unsafe { invoke!(block, extern "C" fn(u64, u64, u64) -> u64, 12, 4, NO_FLAGS) },
             16
         );
 
         assert_eq!(
             unsafe {
                 invoke!(
-                    jit_page,
+                    block,
                     extern "C" fn(u64, u64, u64) -> u64,
                     0x7FFF_FFFF,
                     4,
@@ -947,7 +928,7 @@ mod test {
         assert_eq!(
             unsafe {
                 invoke!(
-                    jit_page,
+                    block,
                     extern "C" fn(u64, u64, u64) -> u64,
                     0xFFFF_FFFF,
                     4,
@@ -960,9 +941,9 @@ mod test {
 
     #[test]
     fn test_sub_with_borrow() {
-        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+        let mut block = Block::allocate(page::size()).unwrap();
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             opcode_stream.push_opcode(Msr::new(NZCV, Register::X2).generate());
             opcode_stream
                 .push_opcode(Sbc::new(Register::X0, Register::X0, Register::X1).generate());
@@ -972,40 +953,24 @@ mod test {
         const BORROW: u64 = 0x00000000;
         const NO_BORROW: u64 = 0x20000000;
         assert_eq!(
-            unsafe { invoke!(jit_page, extern "C" fn(u64, u64, u64) -> u64, 12, 4, BORROW) },
+            unsafe { invoke!(block, extern "C" fn(u64, u64, u64) -> u64, 12, 4, BORROW) },
             7
         );
 
         assert_eq!(
-            unsafe {
-                invoke!(
-                    jit_page,
-                    extern "C" fn(u64, u64, u64) -> u64,
-                    12,
-                    4,
-                    NO_BORROW
-                )
-            },
+            unsafe { invoke!(block, extern "C" fn(u64, u64, u64) -> u64, 12, 4, NO_BORROW) },
             8
         );
 
         assert_eq!(
-            unsafe {
-                invoke!(
-                    jit_page,
-                    extern "C" fn(u64, u64, u64) -> u64,
-                    12,
-                    12,
-                    BORROW
-                )
-            },
+            unsafe { invoke!(block, extern "C" fn(u64, u64, u64) -> u64, 12, 12, BORROW) },
             0xFFFF_FFFF_FFFF_FFFF
         );
 
         assert_eq!(
             unsafe {
                 invoke!(
-                    jit_page,
+                    block,
                     extern "C" fn(u64, u64, u64) -> u64,
                     11,
                     12,
@@ -1018,9 +983,9 @@ mod test {
 
     #[test]
     fn test_sub_with_borrow_32_bit() {
-        let mut jit_page = JitPage::allocate(page::size()).unwrap();
+        let mut block = Block::allocate(page::size()).unwrap();
 
-        jit_page.populate(|opcode_stream| {
+        block.populate(|opcode_stream| {
             opcode_stream.push_opcode(Msr::new(NZCV, Register::X2).generate());
             opcode_stream.push_opcode(
                 Sbc::new(Register::X0, Register::X0, Register::X1)
@@ -1033,40 +998,24 @@ mod test {
         const BORROW: u64 = 0x00000000;
         const NO_BORROW: u64 = 0x20000000;
         assert_eq!(
-            unsafe { invoke!(jit_page, extern "C" fn(u64, u64, u64) -> u64, 12, 4, BORROW) },
+            unsafe { invoke!(block, extern "C" fn(u64, u64, u64) -> u64, 12, 4, BORROW) },
             7
         );
 
         assert_eq!(
-            unsafe {
-                invoke!(
-                    jit_page,
-                    extern "C" fn(u64, u64, u64) -> u64,
-                    12,
-                    4,
-                    NO_BORROW
-                )
-            },
+            unsafe { invoke!(block, extern "C" fn(u64, u64, u64) -> u64, 12, 4, NO_BORROW) },
             8
         );
 
         assert_eq!(
-            unsafe {
-                invoke!(
-                    jit_page,
-                    extern "C" fn(u64, u64, u64) -> u64,
-                    12,
-                    12,
-                    BORROW
-                )
-            },
+            unsafe { invoke!(block, extern "C" fn(u64, u64, u64) -> u64, 12, 12, BORROW) },
             0xFFFF_FFFF
         );
 
         assert_eq!(
             unsafe {
                 invoke!(
-                    jit_page,
+                    block,
                     extern "C" fn(u64, u64, u64) -> u64,
                     11,
                     12,

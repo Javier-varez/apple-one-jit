@@ -1,6 +1,6 @@
 use crate::arm_asm;
+use crate::block::{Block, OpCodeStream};
 use crate::dynamic_compiler::Error::Unknown6502OpCode;
-use crate::jit::{JitPage, OpCodeStream};
 use crate::mos6502;
 
 core::arch::global_asm!(include_str!("dynamic_compiler.S"));
@@ -38,7 +38,7 @@ pub struct CpuState {
 }
 
 pub struct Compiler {
-    page: JitPage,
+    block: Block,
     decoder: mos6502::InstrDecoder,
 }
 
@@ -56,14 +56,14 @@ impl Compiler {
     /// Constructs a new dynamic re-compiler, allocating a JIT page to store the generated code
     pub fn new() -> Result<Self, region::Error> {
         Ok(Self {
-            page: JitPage::allocate(region::page::size())?,
+            block: Block::allocate(region::page::size())?,
             decoder: mos6502::InstrDecoder::new(),
         })
     }
 
     /// Translates the given mos6502 machine code into native arm64 machine code.
     pub fn translate_code(&mut self, buffer: &[u8]) -> Result<(), Error> {
-        self.page.populate(|opcode_stream| {
+        self.block.populate(|opcode_stream| {
             Self::translate_code_impl(&mut self.decoder, opcode_stream, buffer)
         })
     }
@@ -663,7 +663,7 @@ impl Compiler {
     /// # Safety
     /// Must guarantee that the compiled code is valid and will naturally complete execution
     pub unsafe fn run(&mut self, state: &mut CpuState, memory: &mut [u8]) {
-        self.page.run(|ptr| {
+        self.block.run(|ptr| {
             #[cfg(target_os = "macos")]
             jumpToEmulatedCode(ptr, state as *mut CpuState, memory.as_mut_ptr());
             #[cfg(not(target_os = "macos"))]
