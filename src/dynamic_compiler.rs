@@ -1,20 +1,13 @@
-use crate::arm_asm;
-use crate::block::{Block, OpCodeStream};
+use crate::arm_asm::{self, Immediate};
+use crate::block::{Block, LocationRange, Marker, OpCodeStream};
 use crate::dynamic_compiler::Error::Unknown6502OpCode;
+use crate::memory::{Address, MemoryInterface};
 use crate::mos6502;
 
 core::arch::global_asm!(include_str!("dynamic_compiler.S"));
 
-extern "C" {
-    #[cfg(target_os = "macos")]
-    fn jumpToEmulatedCode(ptr: *const (), state: *mut CpuState, memory: *mut u8);
-    #[cfg(not(target_os = "macos"))]
-    fn _jumpToEmulatedCode(ptr: *const (), state: *mut CpuState, memory: *mut u8);
-}
-
 #[derive(Debug)]
 pub enum Error {
-    // TODO(ja): Add variants
     Unknown6502OpCode,
 }
 
@@ -26,19 +19,7 @@ impl From<mos6502::Error> for Error {
     }
 }
 
-#[repr(C)]
-#[derive(Default, PartialEq, Debug)]
-pub struct CpuState {
-    pub a: u64,
-    pub x: u64,
-    pub y: u64,
-    pub sp: u64,
-    pub pc: u64,
-    pub flags: u64,
-}
-
 pub struct Compiler {
-    block: Block,
     decoder: mos6502::InstrDecoder,
 }
 
@@ -47,24 +28,84 @@ const X_REGISTER: arm_asm::Register = arm_asm::Register::X1;
 const Y_REGISTER: arm_asm::Register = arm_asm::Register::X2;
 const SP_REGISTER: arm_asm::Register = arm_asm::Register::X3;
 const PC_REGISTER: arm_asm::Register = arm_asm::Register::X4;
-const MEMORY_MAP_BASE_ADDR_REGISTER: arm_asm::Register = arm_asm::Register::X5;
+const _MEMORY_INTERFACE_REG: arm_asm::Register = arm_asm::Register::X5;
 const DECODED_OP_REGISTER: arm_asm::Register = arm_asm::Register::X6;
 const SCRATCH_REGISTER: arm_asm::Register = arm_asm::Register::X7;
 const SCRATCH_REGISTER_2: arm_asm::Register = arm_asm::Register::X8;
+const CALL_ARG0: arm_asm::Register = arm_asm::Register::X9;
+const CALL_ARG1: arm_asm::Register = arm_asm::Register::X10;
+const CALL_RESULT0: arm_asm::Register = arm_asm::Register::X9;
+const TRAMPOLIN_TARGET: arm_asm::Register = arm_asm::Register::X11;
+
+extern "C" {
+    static _memory_write_8_bits_asm: u8;
+    static _memory_write_16_bits_asm: u8;
+    static _memory_read_8_bits_asm: u8;
+    static _memory_read_16_bits_asm: u8;
+}
+
+#[no_mangle]
+pub extern "C" fn memory_write_8_bits(
+    interface: *mut &mut dyn MemoryInterface,
+    addr: Address,
+    data: u8,
+) {
+    println!("Writting 8-bit memory to address: {addr}, data: {data}");
+    unsafe { (*interface).write_8_bits(addr, data) };
+}
+
+#[no_mangle]
+pub extern "C" fn memory_write_16_bits(
+    interface: *mut &mut dyn MemoryInterface,
+    addr: Address,
+    data: u16,
+) {
+    println!("Writting 16-bit memory to address: {addr}, data: {data}");
+    unsafe { (*interface).write_16_bits(addr, data) };
+}
+
+#[no_mangle]
+pub extern "C" fn memory_read_8_bits(
+    interface: *mut &mut dyn MemoryInterface,
+    addr: Address,
+) -> u8 {
+    println!("Reading 8-bit memory from address: {addr}");
+    unsafe { (*interface).read_8_bits(addr) }
+}
+
+#[no_mangle]
+pub extern "C" fn memory_read_16_bits(
+    interface: *mut &mut dyn MemoryInterface,
+    addr: Address,
+) -> u16 {
+    println!("Reading 16-bit memory from address: {addr}");
+    unsafe { (*interface).read_16_bits(addr) }
+}
+
+struct Trampolines {
+    write_8_bit: Marker,
+    _write_16_bit: Marker,
+    read_8_bit: Marker,
+    read_16_bit: Marker,
+}
 
 impl Compiler {
-    /// Constructs a new dynamic re-compiler, allocating a JIT page to store the generated code
-    pub fn new() -> Result<Self, region::Error> {
-        Ok(Self {
-            block: Block::allocate(region::page::size())?,
+    /// Constructs a new dynamic re-compiler
+    pub fn new() -> Self {
+        Self {
             decoder: mos6502::InstrDecoder::new(),
-        })
+        }
     }
 
     /// Translates the given mos6502 machine code into native arm64 machine code.
-    pub fn translate_code(&mut self, buffer: &[u8]) -> Result<(), Error> {
-        self.block.populate(|opcode_stream| {
-            Self::translate_code_impl(&mut self.decoder, opcode_stream, buffer)
+    pub fn translate_code(
+        &mut self,
+        block: &mut Block,
+        address: Address,
+        memory_interface: &mut dyn MemoryInterface,
+    ) -> Result<LocationRange, Error> {
+        block.populate(|opcode_stream| {
+            Self::translate_code_impl(&mut self.decoder, opcode_stream, address, memory_interface)
         })
     }
 
@@ -83,25 +124,176 @@ impl Compiler {
     fn translate_code_impl(
         decoder: &mut mos6502::InstrDecoder,
         opcode_stream: &mut OpCodeStream,
-        buffer: &[u8],
-    ) -> Result<(), Error> {
-        for byte in buffer.iter() {
-            if let Some(instr) = decoder.feed(*byte)? {
+        start_address: Address,
+        memory_interface: &mut dyn MemoryInterface,
+    ) -> Result<LocationRange, Error> {
+        let trampolines = Self::emit_trampolines(opcode_stream);
+
+        let mut address = start_address;
+        let mut should_continue = true;
+        while should_continue {
+            if let Some(instr) = decoder.feed(memory_interface.read_8_bits(address))? {
                 println!("Decoded instr {:?}", instr);
-                Self::emit_instruction_address_mode(opcode_stream, &instr);
-                Self::emit_instruction(opcode_stream, &instr);
+                Self::emit_instruction_address_mode(opcode_stream, &instr, &trampolines);
+                Self::emit_instruction(opcode_stream, &instr, &trampolines);
                 if !instr.opcode.base_instruction().is_branching_op() {
                     // Conditional branchs need to handle this internally. Jumps simply don't need
                     // this because they always set the PC
                     Self::emit_increment_pc(opcode_stream, &instr);
                 }
+                should_continue = Self::should_continue(&instr);
             }
+            address = address.wrapping_add(1);
         }
 
         // Just in case the instruction decoder did not find any isntr
         opcode_stream.push_opcode(arm_asm::Ret::new().generate());
 
-        Ok(())
+        Ok(LocationRange::new(start_address, address))
+    }
+
+    fn should_continue(instruction: &mos6502::Instruction) -> bool {
+        use mos6502::instructions::BaseInstruction;
+        match instruction.opcode.base_instruction() {
+            // TODO(javier-varez): Handle other instructions that can cause an exit
+            BaseInstruction::Jsr
+            | BaseInstruction::Jmp
+            | BaseInstruction::Bcc
+            | BaseInstruction::Bcs
+            | BaseInstruction::Beq
+            | BaseInstruction::Bne
+            | BaseInstruction::Bmi
+            | BaseInstruction::Bpl
+            | BaseInstruction::Bvs
+            | BaseInstruction::Bvc
+            | BaseInstruction::Rts => false,
+            _ => true,
+        }
+    }
+
+    fn emit_trampolines(opcode_stream: &mut OpCodeStream) -> Trampolines {
+        let forward_jump_marker = opcode_stream.add_marker();
+        unsafe {
+            let read_8_bit_marker = opcode_stream.push_pointer(&_memory_read_8_bits_asm);
+            let read_16_bit_marker = opcode_stream.push_pointer(&_memory_read_16_bits_asm);
+            let write_8_bit_marker = opcode_stream.push_pointer(&_memory_write_8_bits_asm);
+            let write_16_bit_marker = opcode_stream.push_pointer(&_memory_write_16_bits_asm);
+
+            let jump_target =
+                opcode_stream.relative_distance(&write_16_bit_marker.next(), &forward_jump_marker);
+
+            opcode_stream.patch_opcode(
+                &forward_jump_marker,
+                arm_asm::Branch::new()
+                    .with_immediate(arm_asm::SignedImmediate::new(jump_target))
+                    .generate(),
+            );
+
+            // Save pointers as data here.
+            Trampolines {
+                read_8_bit: read_8_bit_marker,
+                read_16_bit: read_16_bit_marker,
+                write_8_bit: write_8_bit_marker,
+                _write_16_bit: write_16_bit_marker,
+            }
+        }
+    }
+
+    fn emit_function_call(opcode_stream: &mut OpCodeStream, target: &Marker) {
+        // Load address of the target trampoline
+        let current_location = opcode_stream.add_marker();
+        let target_relative_distance = opcode_stream.relative_distance(target, &current_location);
+        opcode_stream.patch_opcode(
+            &current_location,
+            arm_asm::LdrLit::new(
+                TRAMPOLIN_TARGET,
+                arm_asm::SignedImmediate::new(target_relative_distance),
+            )
+            .generate(),
+        );
+        // Jump to it (saving the LR)
+        opcode_stream.push_opcode(
+            arm_asm::Sub::new(arm_asm::Register::SpZr, arm_asm::Register::SpZr)
+                .with_immediate(Immediate::new(0x10))
+                .generate(),
+        );
+        opcode_stream.push_opcode(
+            arm_asm::Strd::new(arm_asm::Register::X30, arm_asm::Register::SpZr)
+                .with_mode(arm_asm::MemoryAccessMode::UnsignedOffsetImmediate(
+                    Immediate::new(0),
+                ))
+                .generate(),
+        );
+        opcode_stream.push_opcode(
+            arm_asm::Branch::new()
+                .with_register(TRAMPOLIN_TARGET)
+                .link()
+                .generate(),
+        );
+        opcode_stream.push_opcode(
+            arm_asm::Ldrd::new(arm_asm::Register::X30, arm_asm::Register::SpZr)
+                .with_mode(arm_asm::MemoryAccessMode::UnsignedOffsetImmediate(
+                    Immediate::new(0),
+                ))
+                .generate(),
+        );
+        opcode_stream.push_opcode(
+            arm_asm::Add::new(arm_asm::Register::SpZr, arm_asm::Register::SpZr)
+                .with_immediate(Immediate::new(0x10))
+                .generate(),
+        );
+    }
+
+    fn emit_8_byte_load(
+        opcode_stream: &mut OpCodeStream,
+        trampolines: &Trampolines,
+        target_reg: arm_asm::Register,
+        addr_reg: arm_asm::Register,
+    ) {
+        opcode_stream.push_opcode(arm_asm::Mov::new(CALL_ARG0, addr_reg).generate());
+        Self::emit_function_call(opcode_stream, &trampolines.read_8_bit);
+        opcode_stream.push_opcode(arm_asm::Mov::new(target_reg, CALL_RESULT0).generate());
+    }
+
+    fn emit_8_byte_load_immediate_addr(
+        opcode_stream: &mut OpCodeStream,
+        trampolines: &Trampolines,
+        target_reg: arm_asm::Register,
+        address: u16,
+    ) {
+        opcode_stream.push_opcode(
+            arm_asm::Movz::new(CALL_ARG0)
+                .with_immediate(arm_asm::Immediate::new(address as u64))
+                .generate(),
+        );
+        Self::emit_function_call(opcode_stream, &trampolines.read_8_bit);
+        opcode_stream.push_opcode(arm_asm::Mov::new(target_reg, CALL_RESULT0).generate());
+    }
+
+    fn emit_16_byte_load_immediate_addr(
+        opcode_stream: &mut OpCodeStream,
+        trampolines: &Trampolines,
+        target_reg: arm_asm::Register,
+        address: u16,
+    ) {
+        opcode_stream.push_opcode(
+            arm_asm::Movz::new(CALL_ARG0)
+                .with_immediate(arm_asm::Immediate::new(address as u64))
+                .generate(),
+        );
+        Self::emit_function_call(opcode_stream, &trampolines.read_16_bit);
+        opcode_stream.push_opcode(arm_asm::Mov::new(target_reg, CALL_RESULT0).generate());
+    }
+
+    fn emit_8_byte_store(
+        opcode_stream: &mut OpCodeStream,
+        trampolines: &Trampolines,
+        address_reg: arm_asm::Register,
+        data_reg: arm_asm::Register,
+    ) {
+        opcode_stream.push_opcode(arm_asm::Mov::new(CALL_ARG0, address_reg).generate());
+        opcode_stream.push_opcode(arm_asm::Mov::new(CALL_ARG1, data_reg).generate());
+        Self::emit_function_call(opcode_stream, &trampolines.write_8_bit);
     }
 
     fn emit_increment_pc(opcode_stream: &mut OpCodeStream, instruction: &mos6502::Instruction) {
@@ -176,48 +368,24 @@ impl Compiler {
     fn emit_addr_mode_indirect(
         opcode_stream: &mut OpCodeStream,
         instruction: &mos6502::Instruction,
+        trampolines: &Trampolines,
     ) {
         let mos6502::addressing_modes::Operand::U16(value) = instruction.operand else {
                     panic!("Unexpected operand type {:?} for AddressingMode::Indirect", instruction.operand);
                 };
 
-        if value & 0xff == 0xff {
-            // This is annoying because a bug in the 6502 would cause a read of 0x33ff
-            // to read the low byte from 0x33ff and the high byte from 0x3300
-            opcode_stream.push_opcode(
-                arm_asm::Ldrb::new(DECODED_OP_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
-                    .with_mode(arm_asm::MemoryAccessMode::UnsignedOffsetImmediate(
-                        arm_asm::Immediate::new(value as u64),
-                    ))
-                    .generate(),
-            );
-            opcode_stream.push_opcode(
-                arm_asm::Ldrb::new(SCRATCH_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
-                    .with_mode(arm_asm::MemoryAccessMode::UnsignedOffsetImmediate(
-                        arm_asm::Immediate::new(value as u64),
-                    ))
-                    .generate(),
-            );
-            opcode_stream.push_opcode(
-                arm_asm::Add::new(DECODED_OP_REGISTER, DECODED_OP_REGISTER)
-                    .with_shifted_reg(SCRATCH_REGISTER)
-                    .with_shift(arm_asm::RegShift::Lsl(8))
-                    .generate(),
-            );
-        } else {
-            opcode_stream.push_opcode(
-                arm_asm::Ldrh::new(DECODED_OP_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
-                    .with_mode(arm_asm::MemoryAccessMode::UnsignedOffsetImmediate(
-                        arm_asm::Immediate::new(value as u64),
-                    ))
-                    .generate(),
-            );
-        }
+        Self::emit_16_byte_load_immediate_addr(
+            opcode_stream,
+            trampolines,
+            DECODED_OP_REGISTER,
+            value,
+        );
     }
 
     fn emit_addr_mode_x_indexed_indirect(
         opcode_stream: &mut OpCodeStream,
         instruction: &mos6502::Instruction,
+        trampolines: &Trampolines,
     ) {
         let mos6502::addressing_modes::Operand::U8(value) = instruction.operand else {
                     panic!("Unexpected operand type {:?} for AddressingMode::XIndexedIndirect", instruction.operand);
@@ -243,10 +411,11 @@ impl Compiler {
                 .with_immediate(arm_asm::Immediate::new(0xff))
                 .generate(),
         );
-        opcode_stream.push_opcode(
-            arm_asm::Ldrb::new(DECODED_OP_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
-                .with_mode(arm_asm::MemoryAccessMode::ShiftedRegister(SCRATCH_REGISTER))
-                .generate(),
+        Self::emit_8_byte_load(
+            opcode_stream,
+            trampolines,
+            DECODED_OP_REGISTER,
+            SCRATCH_REGISTER,
         );
         opcode_stream.push_opcode(
             arm_asm::Add::new(SCRATCH_REGISTER, X_REGISTER)
@@ -258,10 +427,11 @@ impl Compiler {
                 .with_immediate(arm_asm::Immediate::new(0xff))
                 .generate(),
         );
-        opcode_stream.push_opcode(
-            arm_asm::Ldrb::new(SCRATCH_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
-                .with_mode(arm_asm::MemoryAccessMode::ShiftedRegister(SCRATCH_REGISTER))
-                .generate(),
+        Self::emit_8_byte_load(
+            opcode_stream,
+            trampolines,
+            SCRATCH_REGISTER,
+            SCRATCH_REGISTER,
         );
         opcode_stream.push_opcode(
             arm_asm::Add::new(DECODED_OP_REGISTER, DECODED_OP_REGISTER)
@@ -274,6 +444,7 @@ impl Compiler {
     fn emit_addr_mode_indirect_y_indexed(
         opcode_stream: &mut OpCodeStream,
         instruction: &mos6502::Instruction,
+        trampolines: &Trampolines,
     ) {
         let mos6502::addressing_modes::Operand::U8(value) = instruction.operand else {
                     panic!("Unexpected operand type {:?} for AddressingMode::IndirectYIndexed", instruction.operand);
@@ -282,19 +453,17 @@ impl Compiler {
         // (u8 operand) => addr in zero page + y reg => the address we want
         if value == 0xff {
             // We have wraparound and needs special handling
-            opcode_stream.push_opcode(
-                arm_asm::Ldrb::new(DECODED_OP_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
-                    .with_mode(arm_asm::MemoryAccessMode::UnsignedOffsetImmediate(
-                        arm_asm::Immediate::new(0xff),
-                    ))
-                    .generate(),
+            Self::emit_8_byte_load_immediate_addr(
+                opcode_stream,
+                trampolines,
+                DECODED_OP_REGISTER,
+                0xff,
             );
-            opcode_stream.push_opcode(
-                arm_asm::Ldrb::new(SCRATCH_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
-                    .with_mode(arm_asm::MemoryAccessMode::UnsignedOffsetImmediate(
-                        arm_asm::Immediate::new(0x00),
-                    ))
-                    .generate(),
+            Self::emit_8_byte_load_immediate_addr(
+                opcode_stream,
+                trampolines,
+                SCRATCH_REGISTER,
+                0x00,
             );
             opcode_stream.push_opcode(
                 arm_asm::Add::new(DECODED_OP_REGISTER, DECODED_OP_REGISTER)
@@ -303,20 +472,11 @@ impl Compiler {
                     .generate(),
             );
         } else {
-            opcode_stream.push_opcode(
-                arm_asm::Add::new(SCRATCH_REGISTER, MEMORY_MAP_BASE_ADDR_REGISTER)
-                    .with_immediate(arm_asm::Immediate::new(value as u64))
-                    .generate(),
-            );
-            opcode_stream.push_opcode(
-                arm_asm::Ldrh::new(DECODED_OP_REGISTER, SCRATCH_REGISTER)
-                    .with_mode(arm_asm::MemoryAccessMode::UnsignedOffsetImmediate(
-                        // This offset is annoying! It is in 16-bit words... That is why
-                        // this instruction is split at the moment using the scratch
-                        // register
-                        arm_asm::Immediate::new(0),
-                    ))
-                    .generate(),
+            Self::emit_16_byte_load_immediate_addr(
+                opcode_stream,
+                trampolines,
+                DECODED_OP_REGISTER,
+                value as u16,
             );
             opcode_stream.push_opcode(
                 arm_asm::Add::new(DECODED_OP_REGISTER, DECODED_OP_REGISTER)
@@ -369,6 +529,7 @@ impl Compiler {
     fn emit_instruction_address_mode(
         opcode_stream: &mut OpCodeStream,
         instruction: &mos6502::Instruction,
+        trampolines: &Trampolines,
     ) {
         match &instruction.opcode.addressing_mode() {
             mos6502::addressing_modes::AddressingMode::Accumulator => {
@@ -390,13 +551,13 @@ impl Compiler {
                 // Nothing to do here! :)
             }
             mos6502::addressing_modes::AddressingMode::Indirect => {
-                Self::emit_addr_mode_indirect(opcode_stream, instruction);
+                Self::emit_addr_mode_indirect(opcode_stream, instruction, trampolines);
             }
             mos6502::addressing_modes::AddressingMode::XIndexedIndirect => {
-                Self::emit_addr_mode_x_indexed_indirect(opcode_stream, instruction);
+                Self::emit_addr_mode_x_indexed_indirect(opcode_stream, instruction, trampolines);
             }
             mos6502::addressing_modes::AddressingMode::IndirectYIndexed => {
-                Self::emit_addr_mode_indirect_y_indexed(opcode_stream, instruction);
+                Self::emit_addr_mode_indirect_y_indexed(opcode_stream, instruction, trampolines);
             }
             mos6502::addressing_modes::AddressingMode::Relative => {
                 Self::emit_addr_mode_relative(opcode_stream, instruction);
@@ -417,15 +578,15 @@ impl Compiler {
         opcode_stream: &mut OpCodeStream,
         instruction: &mos6502::Instruction,
         dest_register: arm_asm::Register,
+        trampolines: &Trampolines,
     ) {
         match instruction.opcode.addressing_mode().operand_type() {
             mos6502::addressing_modes::OperandType::Memory => {
-                opcode_stream.push_opcode(
-                    arm_asm::Ldrb::new(dest_register, MEMORY_MAP_BASE_ADDR_REGISTER)
-                        .with_mode(arm_asm::MemoryAccessMode::ShiftedRegister(
-                            DECODED_OP_REGISTER,
-                        ))
-                        .generate(),
+                Self::emit_8_byte_load(
+                    opcode_stream,
+                    trampolines,
+                    dest_register,
+                    DECODED_OP_REGISTER,
                 );
             }
             _ => {}
@@ -491,7 +652,11 @@ impl Compiler {
         }
     }
 
-    fn emit_load_instruction(opcode_stream: &mut OpCodeStream, instruction: &mos6502::Instruction) {
+    fn emit_load_instruction(
+        opcode_stream: &mut OpCodeStream,
+        instruction: &mos6502::Instruction,
+        trampolines: &Trampolines,
+    ) {
         let dest_reg = match instruction.opcode.base_instruction() {
             mos6502::instructions::BaseInstruction::Lda => ACCUMULATOR_REGISTER,
             mos6502::instructions::BaseInstruction::Ldx => X_REGISTER,
@@ -507,12 +672,11 @@ impl Compiler {
             |opcode_stream| {
                 match instruction.opcode.addressing_mode().operand_type() {
                     mos6502::addressing_modes::OperandType::Memory => {
-                        opcode_stream.push_opcode(
-                            arm_asm::Ldrb::new(dest_reg, MEMORY_MAP_BASE_ADDR_REGISTER)
-                                .with_mode(arm_asm::MemoryAccessMode::ShiftedRegister(
-                                    DECODED_OP_REGISTER,
-                                ))
-                                .generate(),
+                        Self::emit_8_byte_load(
+                            opcode_stream,
+                            trampolines,
+                            dest_reg,
+                            DECODED_OP_REGISTER,
                         );
                     }
                     mos6502::addressing_modes::OperandType::Value => {
@@ -533,6 +697,7 @@ impl Compiler {
     fn emit_store_instruction(
         opcode_stream: &mut OpCodeStream,
         instruction: &mos6502::Instruction,
+        trampolines: &Trampolines,
     ) {
         let source_reg = match instruction.opcode.base_instruction() {
             mos6502::instructions::BaseInstruction::Lda => ACCUMULATOR_REGISTER,
@@ -547,38 +712,41 @@ impl Compiler {
             instruction.opcode.addressing_mode().operand_type()
                 == mos6502::addressing_modes::OperandType::Memory
         );
-        opcode_stream.push_opcode(
-            arm_asm::Strb::new(source_reg, MEMORY_MAP_BASE_ADDR_REGISTER)
-                .with_mode(arm_asm::MemoryAccessMode::ShiftedRegister(
-                    DECODED_OP_REGISTER,
-                ))
-                .generate(),
-        );
+        Self::emit_8_byte_store(opcode_stream, trampolines, source_reg, DECODED_OP_REGISTER);
     }
 
     /// Handles the actual instruction, assuming that the decoded operand is available in DECODED_OP_REGISTER
-    fn emit_instruction(opcode_stream: &mut OpCodeStream, instruction: &mos6502::Instruction) {
+    fn emit_instruction(
+        opcode_stream: &mut OpCodeStream,
+        instruction: &mos6502::Instruction,
+        trampolines: &Trampolines,
+    ) {
         match instruction.opcode.base_instruction() {
             mos6502::instructions::BaseInstruction::Lda => {
-                Self::emit_load_instruction(opcode_stream, instruction);
+                Self::emit_load_instruction(opcode_stream, instruction, &trampolines);
             }
             mos6502::instructions::BaseInstruction::Ldx => {
-                Self::emit_load_instruction(opcode_stream, instruction);
+                Self::emit_load_instruction(opcode_stream, instruction, &trampolines);
             }
             mos6502::instructions::BaseInstruction::Ldy => {
-                Self::emit_load_instruction(opcode_stream, instruction);
+                Self::emit_load_instruction(opcode_stream, instruction, &trampolines);
             }
             mos6502::instructions::BaseInstruction::Sta => {
-                Self::emit_store_instruction(opcode_stream, instruction);
+                Self::emit_store_instruction(opcode_stream, instruction, &trampolines);
             }
             mos6502::instructions::BaseInstruction::Stx => {
-                Self::emit_store_instruction(opcode_stream, instruction);
+                Self::emit_store_instruction(opcode_stream, instruction, &trampolines);
             }
             mos6502::instructions::BaseInstruction::Sty => {
-                Self::emit_store_instruction(opcode_stream, instruction);
+                Self::emit_store_instruction(opcode_stream, instruction, &trampolines);
             }
             mos6502::instructions::BaseInstruction::Adc => {
-                Self::emit_deref_if_needed(opcode_stream, instruction, DECODED_OP_REGISTER);
+                Self::emit_deref_if_needed(
+                    opcode_stream,
+                    instruction,
+                    DECODED_OP_REGISTER,
+                    trampolines,
+                );
                 opcode_stream.push_opcode(
                     arm_asm::Sxtb::new(ACCUMULATOR_REGISTER, ACCUMULATOR_REGISTER).generate(),
                 );
@@ -598,7 +766,12 @@ impl Compiler {
                 opcode_stream.push_opcode(arm_asm::SetF8::new(ACCUMULATOR_REGISTER).generate());
             }
             mos6502::instructions::BaseInstruction::And => {
-                Self::emit_deref_if_needed(opcode_stream, instruction, DECODED_OP_REGISTER);
+                Self::emit_deref_if_needed(
+                    opcode_stream,
+                    instruction,
+                    DECODED_OP_REGISTER,
+                    trampolines,
+                );
                 opcode_stream.push_opcode(
                     arm_asm::And::new(ACCUMULATOR_REGISTER, ACCUMULATOR_REGISTER)
                         .with_shifted_reg(DECODED_OP_REGISTER)
@@ -606,7 +779,12 @@ impl Compiler {
                 );
             }
             mos6502::instructions::BaseInstruction::Ora => {
-                Self::emit_deref_if_needed(opcode_stream, instruction, DECODED_OP_REGISTER);
+                Self::emit_deref_if_needed(
+                    opcode_stream,
+                    instruction,
+                    DECODED_OP_REGISTER,
+                    trampolines,
+                );
                 opcode_stream.push_opcode(
                     arm_asm::Or::new(ACCUMULATOR_REGISTER, ACCUMULATOR_REGISTER)
                         .with_shifted_reg(DECODED_OP_REGISTER)
@@ -614,7 +792,12 @@ impl Compiler {
                 );
             }
             mos6502::instructions::BaseInstruction::Eor => {
-                Self::emit_deref_if_needed(opcode_stream, instruction, DECODED_OP_REGISTER);
+                Self::emit_deref_if_needed(
+                    opcode_stream,
+                    instruction,
+                    DECODED_OP_REGISTER,
+                    trampolines,
+                );
                 opcode_stream.push_opcode(
                     arm_asm::Xor::new(ACCUMULATOR_REGISTER, ACCUMULATOR_REGISTER)
                         .with_shifted_reg(DECODED_OP_REGISTER)
@@ -657,108 +840,5 @@ impl Compiler {
                 unimplemented!();
             }
         }
-    }
-
-    /// Runs the dynamically-reassembled code, protecting temporarily the inner page as RX.
-    /// # Safety
-    /// Must guarantee that the compiled code is valid and will naturally complete execution
-    pub unsafe fn run(&mut self, state: &mut CpuState, memory: &mut [u8]) {
-        self.block.run(|ptr| {
-            #[cfg(target_os = "macos")]
-            jumpToEmulatedCode(ptr, state as *mut CpuState, memory.as_mut_ptr());
-            #[cfg(not(target_os = "macos"))]
-            _jumpToEmulatedCode(ptr, state as *mut CpuState, memory.as_mut_ptr());
-        })
-    }
-}
-
-#[cfg(test)]
-mod test {
-    #[test]
-    fn empty_test() {
-        use super::*;
-
-        let mut state = CpuState::default();
-        let mut memory = [0u8; 256];
-
-        let mut compiler = Compiler::new().unwrap();
-        compiler.translate_code(&[]).unwrap();
-        unsafe { compiler.run(&mut state, &mut memory) };
-    }
-
-    #[test]
-    fn add_test() {
-        use super::*;
-
-        let mut state = CpuState::default();
-        let mut memory = [0u8; 256];
-
-        let mut compiler = Compiler::new().unwrap();
-        compiler
-            .translate_code(&[0xA9, 0x0A, 0x69, 0x14, 0x60])
-            .unwrap();
-        unsafe { compiler.run(&mut state, &mut memory) };
-
-        assert_eq!(state.a, 30);
-    }
-
-    #[test]
-    fn load_acc_immediate_test() {
-        use super::*;
-
-        let mut state = CpuState::default();
-        let mut memory = [0u8; 256];
-
-        let mut compiler = Compiler::new().unwrap();
-        compiler.translate_code(&[0xA9, 0x0A, 0x60]).unwrap();
-        unsafe { compiler.run(&mut state, &mut memory) };
-
-        assert_eq!(state.a, 10);
-    }
-
-    #[test]
-    fn load_acc_memory_test() {
-        use super::*;
-
-        let mut state = CpuState::default();
-        let mut memory = [0u8; 256];
-        memory[0xa] = 0x34;
-
-        let mut compiler = Compiler::new().unwrap();
-        compiler.translate_code(&[0xA5, 0x0A, 0x60]).unwrap();
-        unsafe { compiler.run(&mut state, &mut memory) };
-
-        assert_eq!(state.a, 0x34);
-    }
-
-    #[test]
-    fn add_immediate_test() {
-        use super::*;
-
-        let mut state = CpuState::default();
-        let mut memory = [0u8; 256];
-        memory[0xa] = 0x34;
-
-        let mut compiler = Compiler::new().unwrap();
-        compiler.translate_code(&[0xA5, 0x0A, 0x69, 0x10]).unwrap();
-        unsafe { compiler.run(&mut state, &mut memory) };
-
-        assert_eq!(state.a, 0x44);
-    }
-
-    #[test]
-    fn add_memory_test() {
-        use super::*;
-
-        let mut state = CpuState::default();
-        let mut memory = [0u8; 256];
-        memory[0xa] = 0x34;
-        memory[0x10] = 0x44;
-
-        let mut compiler = Compiler::new().unwrap();
-        compiler.translate_code(&[0xA5, 0x0A, 0x65, 0x10]).unwrap();
-        unsafe { compiler.run(&mut state, &mut memory) };
-
-        assert_eq!(state.a, 0x78);
     }
 }

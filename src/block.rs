@@ -1,32 +1,69 @@
-use std::mem::MaybeUninit;
-
-use crate::arm_asm::{OpCode, Udf};
+use crate::{
+    arm_asm::{OpCode, Udf},
+    memory::Address,
+};
 use region::{alloc, protect, Allocation, Protection};
 
 #[derive(Clone)]
 pub struct Marker {
     index: i64,
+    size: usize, // size in bytes
+}
+
+impl Marker {
+    pub fn next(&self) -> Self {
+        Self {
+            index: self.index + (self.size / std::mem::size_of::<u32>()) as i64,
+            size: 0,
+        }
+    }
 }
 
 pub struct OpCodeStream<'a> {
-    data: &'a mut [MaybeUninit<OpCode>],
+    data: &'a mut [u32],
     index: usize,
 }
 
 impl<'a> OpCodeStream<'a> {
-    pub fn new(data: &'a mut [MaybeUninit<OpCode>]) -> Self {
+    pub fn new(data: &'a mut [u32]) -> Self {
         for op in data.iter_mut() {
-            op.write(Udf::new().generate());
+            *op = Udf::new().generate().value();
         }
         Self { data, index: 0 }
     }
 
     pub fn push_opcode(&mut self, opcode: OpCode) -> Marker {
         let index = self.index;
-        self.data[index].write(opcode);
+        self.data[index] = opcode.value();
         self.index = index + 1;
         Marker {
             index: index as i64,
+            size: 4,
+        }
+    }
+
+    pub fn align(&mut self, size: usize) {
+        let size = size / std::mem::size_of::<u32>();
+        let rest = self.index % size;
+        if rest != 0 {
+            self.index += size - rest;
+        }
+    }
+
+    pub fn push_pointer<T>(&mut self, label: *const T) -> Marker {
+        self.align(8);
+        let saved_index = self.index;
+        let label = label as usize;
+
+        self.data[self.index] = (label & 0xffffffff) as u32;
+        self.index = self.index + 1;
+
+        self.data[self.index] = (label >> 32) as u32;
+        self.index = self.index + 1;
+
+        Marker {
+            index: saved_index as i64,
+            size: 8,
         }
     }
 
@@ -35,6 +72,7 @@ impl<'a> OpCodeStream<'a> {
         self.push_opcode(Udf::new().generate());
         Marker {
             index: index as i64,
+            size: 4,
         }
     }
 
@@ -47,15 +85,13 @@ impl<'a> OpCodeStream<'a> {
     }
 
     pub fn patch_opcode(&mut self, marker: &Marker, opcode: OpCode) {
-        self.data[marker.index as usize].write(opcode);
+        self.data[marker.index as usize] = opcode.value();
     }
 
     pub fn to_file(&self, path: &std::path::Path) {
         let data: Vec<u8> = self.data[..self.index]
             .iter()
-            .map(|value|
-                // At this point the value is initialized
-                unsafe { value.assume_init_ref().value().to_le_bytes() })
+            .map(|value| value.to_le_bytes())
             .flatten()
             .collect();
         std::fs::write(path, data).unwrap();
@@ -73,8 +109,8 @@ impl Block {
     }
 
     pub fn populate<U, T: FnMut(&mut OpCodeStream) -> U>(&mut self, mut callable: T) -> U {
-        let ptr = self.allocation.as_mut_ptr::<MaybeUninit<OpCode>>();
-        let size = self.allocation.len() / std::mem::size_of::<MaybeUninit<OpCode>>();
+        let ptr = self.allocation.as_mut_ptr::<u32>();
+        let size = self.allocation.len() / std::mem::size_of::<u32>();
         let slice = unsafe { std::slice::from_raw_parts_mut(ptr, size) };
         let mut opcode_stream = OpCodeStream::new(slice);
         let val = callable(&mut opcode_stream);
@@ -117,13 +153,34 @@ impl Block {
     }
 }
 
+pub struct LocationRange {
+    base_address: Address,
+    size: usize,
+}
+
+impl LocationRange {
+    /// Creates a new location range from the start and end addresses
+    pub fn new(start_addr: Address, end_addr: Address) -> Self {
+        assert!(end_addr > start_addr);
+        Self {
+            base_address: start_addr,
+            size: (end_addr - start_addr) as usize,
+        }
+    }
+
+    /// Checks if the address is part of this location range
+    pub fn contains(&self, address: Address) -> bool {
+        (self.base_address <= address) && ((self.base_address + self.size as u16) > address)
+    }
+}
+
 #[cfg(all(test, target_arch = "aarch64"))]
 mod test {
     use super::*;
     use crate::arm_asm::{
-        Adc, Add, And, Branch, Condition, Immediate, Ldrd, MemoryAccessMode, Mov, MovShift, Movk,
-        Movn, Movz, Mrs, Msr, OpSize, Or, RegShift, Register, Ret, Sbc, SetF8, SignedImmediate,
-        Strd, Sub, Sxtb, Xor, NZCV,
+        Adc, Add, And, Branch, Condition, Immediate, LdrLit, Ldrd, MemoryAccessMode, Mov, MovShift,
+        Movk, Movn, Movz, Mrs, Msr, OpSize, Or, RegShift, Register, Ret, Sbc, SetF8,
+        SignedImmediate, Strd, Sub, Sxtb, Xor, NZCV,
     };
     use region::page;
 
@@ -1024,5 +1081,72 @@ mod test {
             },
             0xFFFF_FFFF
         );
+    }
+
+    #[test]
+    fn test_load_literal() {
+        let mut block = Block::allocate(page::size()).unwrap();
+
+        let value: u32 = 432;
+        let value_ptr = &value as *const u32;
+
+        block.populate(|opcode_stream| {
+            let ldr_lit_marker = opcode_stream.add_marker();
+            opcode_stream.push_opcode(Ret::new().generate());
+
+            let ptr_marker = opcode_stream.push_pointer(value_ptr);
+            let ptr_distance = opcode_stream.relative_distance(&ptr_marker, &ldr_lit_marker);
+            opcode_stream.patch_opcode(
+                &ldr_lit_marker,
+                LdrLit::new(Register::X0, SignedImmediate::new(ptr_distance)).generate(),
+            );
+        });
+
+        let val = unsafe { invoke!(block, extern "C" fn() -> *const u32) };
+        assert_eq!(val, value_ptr);
+    }
+
+    #[test]
+    fn test_branch_register() {
+        let mut block = Block::allocate(page::size()).unwrap();
+
+        block.populate(|opcode_stream| {
+            opcode_stream.push_opcode(
+                Sub::new(Register::SpZr, Register::SpZr)
+                    .with_immediate(Immediate::new(16))
+                    .generate(),
+            );
+            // Save lr in the stack
+            opcode_stream.push_opcode(
+                Strd::new(Register::X30, Register::SpZr)
+                    .with_mode(MemoryAccessMode::UnsignedOffsetImmediate(Immediate::new(0)))
+                    .generate(),
+            );
+
+            // Call another procedure!
+            opcode_stream.push_opcode(Branch::new().link().with_register(Register::X0).generate());
+            opcode_stream.push_opcode(
+                Movz::new(Register::X0)
+                    .with_immediate(Immediate::new(0x1234))
+                    .generate(),
+            );
+
+            // Save lr in the stack
+            opcode_stream.push_opcode(
+                Ldrd::new(Register::X30, Register::SpZr)
+                    .with_mode(MemoryAccessMode::UnsignedOffsetImmediate(Immediate::new(0)))
+                    .generate(),
+            );
+            opcode_stream.push_opcode(
+                Add::new(Register::SpZr, Register::SpZr)
+                    .with_immediate(Immediate::new(16))
+                    .generate(),
+            );
+            opcode_stream.push_opcode(Ret::new().generate());
+        });
+
+        let func: fn() = || println!("Call happens!");
+        let val = unsafe { invoke!(block, extern "C" fn(fn()) -> u16, func) };
+        assert_eq!(val, 0x1234);
     }
 }

@@ -1,31 +1,31 @@
 [simple]
-entry_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0, flags = [], memory = { 0 = [0x74] } }
-exit_state = { accumulator = 0x74, x = 0, y = 0, sp = 0, pc = 2, flags = [], memory = { 0 = [0x74] } }
+entry_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0x800, flags = [], memory = { 0 = [0x74] } }
+exit_state = { accumulator = 0x74, x = 0, y = 0, sp = 0, pc = 0x802, flags = [], memory = { 0 = [0x74] } }
 
 [sets-neg-flag]
-entry_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0, flags = [], memory = { 0 = [0x84] } }
-exit_state = { accumulator = 0x84, x = 0, y = 0, sp = 0, pc = 2, flags = ["N"], memory = { 0 = [0x84] } }
+entry_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0x800, flags = [], memory = { 0 = [0x84] } }
+exit_state = { accumulator = 0x84, x = 0, y = 0, sp = 0, pc = 0x802, flags = ["N"], memory = { 0 = [0x84] } }
 
 [sets-zero-flag]
-entry_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0, flags = [] }
-exit_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 2, flags = ["Z"] }
+entry_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0x800, flags = [] }
+exit_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0x802, flags = ["Z"] }
 
 [keeps-carry-flag]
-entry_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0, flags = ["C"] }
-exit_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 2, flags = ["C", "Z"] }
+entry_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0x800, flags = ["C"] }
+exit_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0x802, flags = ["C", "Z"] }
 
 [keeps-ov-flag]
-entry_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0, flags = ["V"] }
-exit_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 2, flags = ["V", "Z"] }
+entry_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0x800, flags = ["V"] }
+exit_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0x802, flags = ["V", "Z"] }
 
 [keeps-carry-and-ov-flag]
-entry_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0, flags = ["V", "C"] }
-exit_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 2, flags = ["V", "C", "Z"] }
+entry_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0x800, flags = ["V", "C"] }
+exit_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0x802, flags = ["V", "C", "Z"] }
 
 [changes-clears-neg-flag]
-entry_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0, flags = ["N"] }
-exit_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 2, flags = ["Z"] }
+entry_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0x800, flags = ["N"] }
+exit_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0x802, flags = ["Z"] }
 
 [changes-clears-zero-flag]
-entry_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0, flags = ["Z"], memory = { 0 = [8] } }
-exit_state = { accumulator = 8, x = 0, y = 0, sp = 0, pc = 2, flags = [], memory = { 0 = [8] } }
+entry_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0x800, flags = ["Z"], memory = { 0 = [8] } }
+exit_state = { accumulator = 8, x = 0, y = 0, sp = 0, pc = 0x802, flags = [], memory = { 0 = [8] } }

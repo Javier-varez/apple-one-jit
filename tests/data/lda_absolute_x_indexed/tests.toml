@@ -1,7 +1,7 @@
 [simple]
-entry_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0, flags = [], memory = { 0x1234 = [0x74] } }
-exit_state = { accumulator = 0x74, x = 0, y = 0, sp = 0, pc = 3, flags = [], memory = { 0x1234 = [0x74] } }
+entry_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0x800, flags = [], memory = { 0x1234 = [0x74] } }
+exit_state = { accumulator = 0x74, x = 0, y = 0, sp = 0, pc = 0x803, flags = [], memory = { 0x1234 = [0x74] } }
 
 [sets-neg-flag]
-entry_state = { accumulator = 0, x = 2, y = 0, sp = 0, pc = 0, flags = [], memory = { 0x1236 = [0x84] } }
-exit_state = { accumulator = 0x84, x = 2, y = 0, sp = 0, pc = 3, flags = ["N"], memory = { 0x1236 = [0x84] } }
+entry_state = { accumulator = 0, x = 2, y = 0, sp = 0, pc = 0x800, flags = [], memory = { 0x1236 = [0x84] } }
+exit_state = { accumulator = 0x84, x = 2, y = 0, sp = 0, pc = 0x803, flags = ["N"], memory = { 0x1236 = [0x84] } }

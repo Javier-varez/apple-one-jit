@@ -1,7 +1,32 @@
-use apple_one_jit::dynamic_compiler::{Compiler, CpuState};
+use apple_one_jit::memory::{Address, MemoryInterface};
+use apple_one_jit::virtual_machine::{VirtualMachine, VmState};
 use serde::Deserialize;
 
 include!(concat!(env!("OUT_DIR"), "/generated_tests.rs"));
+
+struct Memory<'a> {
+    memory: &'a std::cell::RefCell<Vec<u8>>,
+}
+
+impl<'a> MemoryInterface for Memory<'a> {
+    fn read_8_bits(&self, addr: Address) -> u8 {
+        let mem = self.memory.borrow_mut();
+        mem[addr as usize]
+    }
+    fn read_16_bits(&self, addr: Address) -> u16 {
+        let mem = self.memory.borrow();
+        (mem[addr as usize] as u16) | ((mem[(addr + 1) as usize] as u16) << 8)
+    }
+    fn write_8_bits(&mut self, addr: Address, data: u8) {
+        let mut mem = self.memory.borrow_mut();
+        mem[addr as usize] = data;
+    }
+    fn write_16_bits(&mut self, addr: Address, data: u16) {
+        let mut mem = self.memory.borrow_mut();
+        mem[addr as usize] = (data & 0xff) as u8;
+        mem[(addr + 1) as usize] = (data >> 8) as u8;
+    }
+}
 
 #[derive(Debug, Deserialize)]
 struct State {
@@ -29,8 +54,8 @@ fn parse_u16(string: &str) -> u16 {
     }
 }
 
-fn build_memory(state: &State) -> Vec<u8> {
-    let mut data = vec![];
+fn build_memory(program: &[u8], state: &State) -> Vec<u8> {
+    let mut data = Vec::from(program);
     data.resize(0x1_0000, 0);
 
     if let Some(memory) = &state.memory {
@@ -67,10 +92,17 @@ fn translate_flags(flags: &[char]) -> u64 {
 fn run_test(test_name: &str, program: &[u8], tests_str: &str) {
     let tests: std::collections::HashMap<String, Test> =
         toml::from_str(tests_str).expect("Invalid tests");
-    let mut compiler = Compiler::new().unwrap();
 
     for (test_case, test) in tests {
-        let mut cpu_state = CpuState {
+        let entry_memory = std::cell::RefCell::new(build_memory(program, &test.entry_state));
+        let mut memory_interface = Memory {
+            memory: &entry_memory,
+        };
+
+        let mut vm = VirtualMachine::new(&mut memory_interface);
+
+        // Set initial state
+        *vm.get_mut_state() = VmState {
             a: test.entry_state.accumulator,
             x: test.entry_state.x,
             y: test.entry_state.y,
@@ -79,7 +111,9 @@ fn run_test(test_name: &str, program: &[u8], tests_str: &str) {
             flags: translate_flags(&test.entry_state.flags),
         };
 
-        let expected_cpu_state = CpuState {
+        vm.run().unwrap();
+
+        let expected_cpu_state = VmState {
             a: test.exit_state.accumulator,
             x: test.exit_state.x,
             y: test.exit_state.y,
@@ -88,21 +122,21 @@ fn run_test(test_name: &str, program: &[u8], tests_str: &str) {
             flags: translate_flags(&test.exit_state.flags),
         };
 
-        let mut entry_memory = build_memory(&test.entry_state);
-        let expected_memory = build_memory(&test.exit_state);
-
-        compiler.translate_code(program).unwrap();
-        unsafe { compiler.run(&mut cpu_state, &mut entry_memory) };
-
         assert_eq!(
-            expected_cpu_state, cpu_state,
+            expected_cpu_state,
+            *vm.get_state(),
             "Unexpected CPU state in test `{}::{}` (expected != actual)",
-            test_name, test_case
+            test_name,
+            test_case
         );
+
+        let expected_memory = build_memory(program, &test.exit_state);
         assert_eq!(
-            expected_memory, entry_memory,
+            expected_memory,
+            *entry_memory.borrow(),
             "Unexpected memory in test `{}::{}` (expected != actual)",
-            test_name, test_case
+            test_name,
+            test_case
         );
     }
 }

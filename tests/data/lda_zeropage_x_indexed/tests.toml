@@ -5,7 +5,7 @@ accumulator = 0
 x = 0
 y = 0
 sp = 0
-pc = 0
+pc = 0x800
 flags = []
 memory = { 5 = [0x74] }
 
@@ -14,7 +14,7 @@ accumulator = 0x74
 x = 0
 y = 0
 sp = 0
-pc = 2
+pc = 0x802
 flags = []
 memory = { 5 = [0x74] }
 
@@ -24,7 +24,7 @@ accumulator = 0
 x = 2
 y = 0
 sp = 0
-pc = 0
+pc = 0x800
 flags = []
 memory = { 7 = [0x84] }
 
@@ -33,6 +33,6 @@ accumulator = 0x84
 x = 2
 y = 0
 sp = 0
-pc = 2
+pc = 0x802
 flags = ['N']
 memory = { 7 = [0x84] }

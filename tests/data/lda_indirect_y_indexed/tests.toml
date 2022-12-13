@@ -5,7 +5,7 @@ accumulator = 0
 x = 2
 y = 0
 sp = 0
-pc = 0
+pc = 0x800
 flags = []
 [y-zero.entry_state.memory]
 2 = [3]
@@ -16,7 +16,7 @@ accumulator = 3
 x = 2
 y = 0
 sp = 0
-pc = 2
+pc = 0x802
 flags = []
 [y-zero.exit_state.memory]
 2 = [3]
@@ -30,7 +30,7 @@ accumulator = 0
 x = 2
 y = 2
 sp = 0
-pc = 0
+pc = 0x800
 flags = []
 [y-not-zero.entry_state.memory]
 2 = [3, 0, 5, 2]
@@ -40,7 +40,7 @@ accumulator = 5
 x = 2
 y = 2
 sp = 0
-pc = 2
+pc = 0x802
 flags = []
 [y-not-zero.exit_state.memory]
 2 = [3, 0, 5, 2]

@@ -212,6 +212,7 @@ mod branch {
     /// ```
     pub struct Branch<T: operand::OperandType, const COND: bool> {
         immediate: Option<SignedImmediate<26>>,
+        register: Option<Register>,
         condition: Option<Condition>,
         link: bool,
         _pd: PhantomData<T>,
@@ -221,6 +222,7 @@ mod branch {
         fn default() -> Self {
             Self {
                 immediate: None,
+                register: None,
                 condition: None,
                 link: false,
                 _pd: PhantomData,
@@ -235,8 +237,14 @@ mod branch {
         }
 
         /// Branches to the address in the given register (absolute jump)
-        pub fn with_register(self, _reg: Register) -> Branch<operand::RegisterOperand, false> {
-            unimplemented!()
+        pub fn with_register(self, reg: Register) -> Branch<operand::RegisterOperand, false> {
+            Branch::<operand::RegisterOperand, false> {
+                immediate: None,
+                register: Some(reg),
+                condition: None,
+                link: self.link,
+                _pd: PhantomData,
+            }
         }
 
         /// Relative branch to the PC, offset by the value of the immediate
@@ -246,6 +254,7 @@ mod branch {
         ) -> Branch<operand::ImmediateOperand, false> {
             Branch::<operand::ImmediateOperand, false> {
                 immediate: Some(imm),
+                register: None,
                 condition: None,
                 link: self.link,
                 _pd: PhantomData,
@@ -267,6 +276,7 @@ mod branch {
             Branch::<operand::ImmediateOperand, true> {
                 immediate: self.immediate,
                 condition: Some(condition),
+                register: None,
                 link: self.link,
                 _pd: PhantomData,
             }
@@ -304,10 +314,16 @@ mod branch {
         }
     }
 
-    impl<const COND: bool> Branch<operand::RegisterOperand, COND> {
+    impl Branch<operand::RegisterOperand, false> {
         /// Builds the OpCode for the instruction
         pub fn generate(self) -> OpCode {
-            unimplemented!()
+            const BASE: u32 = 0xd61f0000;
+            const REG_OFFSET: usize = 5;
+            const LINK_OFFSET: usize = 21;
+            let link = if self.link { 1 << LINK_OFFSET } else { 0 };
+
+            let reg = self.register.unwrap() as u32;
+            OpCode(BASE | (reg << REG_OFFSET) | link)
         }
     }
 }
@@ -1146,8 +1162,43 @@ mod memory_op {
     ///         .with_mode(MemoryAccessMode::UnsignedOffsetImmediate(Immediate::new(1023))).generate();
     /// ```
     pub type Ldrd = MemoryOp<{ AccessType::Load as u8 }, { Size::DoubleWord as u8 }, false>;
+
+    /// A `Ldr` literal operation for Aarch64 (64-bit)
+    /// ```
+    ///     use apple_one_jit::arm_asm::{Register, SignedImmediate, LdrLit};
+    ///     let opcode = LdrLit::new(
+    ///             Register::X0,
+    ///             SignedImmediate::new(4),
+    ///         )
+    ///         .generate();
+    /// ```
+    pub struct LdrLit {
+        dest_reg: Register,
+        literal: SignedImmediate<19>,
+    }
+
+    impl LdrLit {
+        pub fn new(dest_reg: Register, literal: SignedImmediate<19>) -> Self {
+            Self { dest_reg, literal }
+        }
+
+        pub fn generate(self) -> OpCode {
+            const BASE: u32 = 0x1800_0000;
+            const LIT_OFFSET: usize = 5;
+            const REG_OFFSET: usize = 0;
+            const SIZE_OFFSET: usize = 30;
+            const SIZE: u32 = 1; // Always 64-bit
+            OpCode(
+                ((self.literal.0 as u32) << LIT_OFFSET)
+                    | ((self.dest_reg as u32) << REG_OFFSET)
+                    | ((SIZE) << SIZE_OFFSET)
+                    | BASE,
+            )
+        }
+    }
 }
 
+pub use memory_op::LdrLit;
 pub use memory_op::Ldrb;
 pub use memory_op::Ldrd;
 pub use memory_op::Ldrh;

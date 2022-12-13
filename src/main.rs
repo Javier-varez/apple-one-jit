@@ -1,14 +1,23 @@
 #![allow(dead_code)]
 
-use apple_one_jit::dynamic_compiler::{Compiler, CpuState};
+use apple_one_jit::memory::MemoryInterface;
+use apple_one_jit::virtual_machine::VirtualMachine;
+
+struct Memory {}
+
+impl MemoryInterface for Memory {
+    fn read_8_bits(&self, _addr: apple_one_jit::memory::Address) -> u8 {
+        0
+    }
+    fn read_16_bits(&self, _addr: apple_one_jit::memory::Address) -> u16 {
+        0
+    }
+    fn write_8_bits(&mut self, _addr: apple_one_jit::memory::Address, _data: u8) {}
+    fn write_16_bits(&mut self, _addr: apple_one_jit::memory::Address, _data: u16) {}
+}
 
 fn main() {
-    let mut state = CpuState::default();
-    let mut memory = [0u8; 256];
-
-    let mut compiler = Compiler::new().unwrap();
-    compiler
-        .translate_code(&[0xA9, 0x0A, 0x69, 0x14, 0x60])
-        .unwrap();
-    unsafe { compiler.run(&mut state, &mut memory) };
+    let mut memory = Memory {};
+    let mut vm = VirtualMachine::new(&mut memory);
+    vm.run().unwrap();
 }
