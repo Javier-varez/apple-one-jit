@@ -23,46 +23,46 @@
     ret
 .endmacro
 
-.global __memory_write_8_bits_asm
-__memory_write_8_bits_asm:
+.global memory_write_8_bits_asm
+memory_write_8_bits_asm:
     prepare_mem_call
 
     mov x0, x5
     mov x1, x9
     mov x2, x10
-    bl _memory_write_8_bits
+    bl memory_write_8_bits
 
     exit_mem_call
 
-.global __memory_write_16_bits_asm
-__memory_write_16_bits_asm:
+.global memory_write_16_bits_asm
+memory_write_16_bits_asm:
     prepare_mem_call
 
     mov x0, x5
     mov x1, x9
     mov x2, x10
-    bl _memory_write_16_bits
+    bl memory_write_16_bits
 
     exit_mem_call
 
-.global __memory_read_8_bits_asm
-__memory_read_8_bits_asm:
+.global memory_read_8_bits_asm
+memory_read_8_bits_asm:
     prepare_mem_call
 
     mov x0, x5
     mov x1, x9
-    bl _memory_read_8_bits
+    bl memory_read_8_bits
     mov x9, x0
 
     exit_mem_call
 
-.global __memory_read_16_bits_asm
-__memory_read_16_bits_asm:
+.global memory_read_16_bits_asm
+memory_read_16_bits_asm:
     prepare_mem_call
 
     mov x0, x5
     mov x1, x9
-    bl _memory_read_16_bits
+    bl memory_read_16_bits
     mov x9, x0
 
     exit_mem_call

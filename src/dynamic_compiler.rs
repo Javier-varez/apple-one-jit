@@ -38,13 +38,17 @@ const CALL_RESULT0: arm_asm::Register = arm_asm::Register::X9;
 const TRAMPOLIN_TARGET: arm_asm::Register = arm_asm::Register::X11;
 
 extern "C" {
-    static _memory_write_8_bits_asm: u8;
-    static _memory_write_16_bits_asm: u8;
-    static _memory_read_8_bits_asm: u8;
-    static _memory_read_16_bits_asm: u8;
+    #[link_name = "\x01memory_write_8_bits_asm"]
+    static memory_write_8_bits_asm: u8;
+    #[link_name = "\x01memory_write_16_bits_asm"]
+    static memory_write_16_bits_asm: u8;
+    #[link_name = "\x01memory_read_8_bits_asm"]
+    static memory_read_8_bits_asm: u8;
+    #[link_name = "\x01memory_read_16_bits_asm"]
+    static memory_read_16_bits_asm: u8;
 }
 
-#[no_mangle]
+#[export_name = "\x01memory_write_8_bits"]
 pub extern "C" fn memory_write_8_bits(
     interface: *mut &mut dyn MemoryInterface,
     addr: Address,
@@ -54,7 +58,7 @@ pub extern "C" fn memory_write_8_bits(
     unsafe { (*interface).write_8_bits(addr, data) };
 }
 
-#[no_mangle]
+#[export_name = "\x01memory_write_16_bits"]
 pub extern "C" fn memory_write_16_bits(
     interface: *mut &mut dyn MemoryInterface,
     addr: Address,
@@ -64,7 +68,7 @@ pub extern "C" fn memory_write_16_bits(
     unsafe { (*interface).write_16_bits(addr, data) };
 }
 
-#[no_mangle]
+#[export_name = "\x01memory_read_8_bits"]
 pub extern "C" fn memory_read_8_bits(
     interface: *mut &mut dyn MemoryInterface,
     addr: Address,
@@ -73,7 +77,7 @@ pub extern "C" fn memory_read_8_bits(
     unsafe { (*interface).read_8_bits(addr) }
 }
 
-#[no_mangle]
+#[export_name = "\x01memory_read_16_bits"]
 pub extern "C" fn memory_read_16_bits(
     interface: *mut &mut dyn MemoryInterface,
     addr: Address,
@@ -174,10 +178,10 @@ impl Compiler {
     fn emit_trampolines(opcode_stream: &mut OpCodeStream) -> Trampolines {
         let forward_jump_marker = opcode_stream.add_marker();
         unsafe {
-            let read_8_bit_marker = opcode_stream.push_pointer(&_memory_read_8_bits_asm);
-            let read_16_bit_marker = opcode_stream.push_pointer(&_memory_read_16_bits_asm);
-            let write_8_bit_marker = opcode_stream.push_pointer(&_memory_write_8_bits_asm);
-            let write_16_bit_marker = opcode_stream.push_pointer(&_memory_write_16_bits_asm);
+            let read_8_bit_marker = opcode_stream.push_pointer(&memory_read_8_bits_asm);
+            let read_16_bit_marker = opcode_stream.push_pointer(&memory_read_16_bits_asm);
+            let write_8_bit_marker = opcode_stream.push_pointer(&memory_write_8_bits_asm);
+            let write_16_bit_marker = opcode_stream.push_pointer(&memory_write_16_bits_asm);
 
             let jump_target =
                 opcode_stream.relative_distance(&write_16_bit_marker.next(), &forward_jump_marker);

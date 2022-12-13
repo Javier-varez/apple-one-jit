@@ -7,17 +7,11 @@ use crate::{
 core::arch::global_asm!(include_str!("virtual_machine.S"));
 
 extern "C" {
-    #[cfg(target_os = "macos")]
+    #[link_name = "\x01jumpToEmulatedCode"]
     fn jumpToEmulatedCode(
         ptr: *const (),
         state: *mut VmState,
         memory: *mut &mut dyn MemoryInterface,
-    );
-    #[cfg(not(target_os = "macos"))]
-    fn _jumpToEmulatedCode(
-        ptr: *const (),
-        state: *mut VmState,
-        memory: *const &mut dyn MemoryInterface,
     );
 }
 
@@ -73,10 +67,7 @@ impl<'a> VirtualMachine<'a> {
         let memory_iface_ptr: *mut &mut dyn MemoryInterface = &mut self.memory_interface;
         unsafe {
             block.run(|ptr| {
-                #[cfg(target_os = "macos")]
                 jumpToEmulatedCode(ptr, &mut self.state as *mut VmState, memory_iface_ptr);
-                #[cfg(not(target_os = "macos"))]
-                _jumpToEmulatedCode(ptr, &mut self.state as *mut VmState, memory_iface_ptr);
             })
         };
         Ok(())

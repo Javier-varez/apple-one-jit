@@ -1,5 +1,5 @@
-.global _jumpToEmulatedCode
-_jumpToEmulatedCode:
+.global jumpToEmulatedCode
+jumpToEmulatedCode:
     // Push all general purpose registers on the stack.
     // TODO: This is definitely overkill. To be optimized later. Technically we only need to push
     // those registers that are callee-saved AND we change... This keeps larger compatiblity and
