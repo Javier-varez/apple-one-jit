@@ -1,10 +1,10 @@
+use std::marker::PhantomData;
+
 use crate::arm_asm::{self, Immediate};
 use crate::block::{Block, LocationRange, Marker, OpCodeStream};
 use crate::dynamic_compiler::Error::Unknown6502OpCode;
 use crate::memory::{Address, MemoryInterface};
 use crate::mos6502;
-
-core::arch::global_asm!(include_str!("dynamic_compiler.S"));
 
 #[derive(Debug)]
 pub enum Error {
@@ -19,85 +19,46 @@ impl From<mos6502::Error> for Error {
     }
 }
 
-pub struct Compiler {
+pub struct Compiler<T: MemoryInterface> {
     decoder: mos6502::InstrDecoder,
+    _pd: PhantomData<T>,
 }
 
-const ACCUMULATOR_REGISTER: arm_asm::Register = arm_asm::Register::X0;
-const X_REGISTER: arm_asm::Register = arm_asm::Register::X1;
-const Y_REGISTER: arm_asm::Register = arm_asm::Register::X2;
-const SP_REGISTER: arm_asm::Register = arm_asm::Register::X3;
-const PC_REGISTER: arm_asm::Register = arm_asm::Register::X4;
-const _MEMORY_INTERFACE_REG: arm_asm::Register = arm_asm::Register::X5;
-const DECODED_OP_REGISTER: arm_asm::Register = arm_asm::Register::X6;
-const SCRATCH_REGISTER: arm_asm::Register = arm_asm::Register::X7;
-const SCRATCH_REGISTER_2: arm_asm::Register = arm_asm::Register::X8;
-const CALL_ARG0: arm_asm::Register = arm_asm::Register::X9;
-const CALL_ARG1: arm_asm::Register = arm_asm::Register::X10;
-const CALL_RESULT0: arm_asm::Register = arm_asm::Register::X9;
-const TRAMPOLIN_TARGET: arm_asm::Register = arm_asm::Register::X11;
+// These are callee-saved registers, which simplifies our life significantly when calling
+// procedures since we don't need to bother about saving the state of the VM anywhere
+const ACCUMULATOR_REGISTER: arm_asm::Register = arm_asm::Register::X19;
+const X_REGISTER: arm_asm::Register = arm_asm::Register::X20;
+const Y_REGISTER: arm_asm::Register = arm_asm::Register::X21;
+const SP_REGISTER: arm_asm::Register = arm_asm::Register::X22;
+const PC_REGISTER: arm_asm::Register = arm_asm::Register::X23;
+const MEMORY_INTERFACE_REG: arm_asm::Register = arm_asm::Register::X24;
+const DECODED_OP_REGISTER: arm_asm::Register = arm_asm::Register::X25;
+const SCRATCH_REGISTER: arm_asm::Register = arm_asm::Register::X26;
+const SCRATCH_REGISTER_2: arm_asm::Register = arm_asm::Register::X27;
 
-extern "C" {
-    #[link_name = "\x01memory_write_8_bits_asm"]
-    static memory_write_8_bits_asm: u8;
-    #[link_name = "\x01memory_write_16_bits_asm"]
-    static memory_write_16_bits_asm: u8;
-    #[link_name = "\x01memory_read_8_bits_asm"]
-    static memory_read_8_bits_asm: u8;
-    #[link_name = "\x01memory_read_16_bits_asm"]
-    static memory_read_16_bits_asm: u8;
-}
+// These are registers used for procedure calls, as defined by the AAPCS
+const CALL_ARG0: arm_asm::Register = arm_asm::Register::X0;
+const CALL_ARG1: arm_asm::Register = arm_asm::Register::X1;
+const CALL_ARG2: arm_asm::Register = arm_asm::Register::X2;
+const CALL_RESULT0: arm_asm::Register = arm_asm::Register::X0;
 
-#[export_name = "\x01memory_write_8_bits"]
-pub extern "C" fn memory_write_8_bits(
-    interface: *mut &mut dyn MemoryInterface,
-    addr: Address,
-    data: u8,
-) {
-    println!("Writting 8-bit memory to address: {addr}, data: {data}");
-    unsafe { (*interface).write_8_bits(addr, data) };
-}
+// This is an intra-procedure register, used for the trampoline.
+const TRAMPOLIN_TARGET: arm_asm::Register = arm_asm::Register::X17;
 
-#[export_name = "\x01memory_write_16_bits"]
-pub extern "C" fn memory_write_16_bits(
-    interface: *mut &mut dyn MemoryInterface,
-    addr: Address,
-    data: u16,
-) {
-    println!("Writting 16-bit memory to address: {addr}, data: {data}");
-    unsafe { (*interface).write_16_bits(addr, data) };
-}
-
-#[export_name = "\x01memory_read_8_bits"]
-pub extern "C" fn memory_read_8_bits(
-    interface: *mut &mut dyn MemoryInterface,
-    addr: Address,
-) -> u8 {
-    println!("Reading 8-bit memory from address: {addr}");
-    unsafe { (*interface).read_8_bits(addr) }
-}
-
-#[export_name = "\x01memory_read_16_bits"]
-pub extern "C" fn memory_read_16_bits(
-    interface: *mut &mut dyn MemoryInterface,
-    addr: Address,
-) -> u16 {
-    println!("Reading 16-bit memory from address: {addr}");
-    unsafe { (*interface).read_16_bits(addr) }
-}
+type Trampoline = Marker;
 
 struct Trampolines {
-    write_8_bit: Marker,
-    _write_16_bit: Marker,
-    read_8_bit: Marker,
-    read_16_bit: Marker,
+    write_8_bit: Trampoline,
+    read_8_bit: Trampoline,
+    read_16_bit: Trampoline,
 }
 
-impl Compiler {
+impl<T: MemoryInterface> Compiler<T> {
     /// Constructs a new dynamic re-compiler
     pub fn new() -> Self {
         Self {
             decoder: mos6502::InstrDecoder::new(),
+            _pd: PhantomData {},
         }
     }
 
@@ -177,51 +138,40 @@ impl Compiler {
 
     fn emit_trampolines(opcode_stream: &mut OpCodeStream) -> Trampolines {
         let forward_jump_marker = opcode_stream.add_marker();
-        unsafe {
-            let read_8_bit_marker = opcode_stream.push_pointer(&memory_read_8_bits_asm);
-            let read_16_bit_marker = opcode_stream.push_pointer(&memory_read_16_bits_asm);
-            let write_8_bit_marker = opcode_stream.push_pointer(&memory_write_8_bits_asm);
-            let write_16_bit_marker = opcode_stream.push_pointer(&memory_write_16_bits_asm);
 
-            let jump_target =
-                opcode_stream.relative_distance(&write_16_bit_marker.next(), &forward_jump_marker);
+        let read_8_bit_func: *const () = <T as MemoryInterface>::read_8_bits as *const _;
+        let read_16_bit_func: *const () = <T as MemoryInterface>::read_16_bits as *const _;
+        let write_8_bit_func: *const () = <T as MemoryInterface>::write_8_bits as *const _;
+        let read_8_bit_marker = opcode_stream.push_pointer(read_8_bit_func);
+        let read_16_bit_marker = opcode_stream.push_pointer(read_16_bit_func);
+        let write_8_bit_marker = opcode_stream.push_pointer(write_8_bit_func);
 
-            opcode_stream.patch_opcode(
-                &forward_jump_marker,
-                arm_asm::Branch::new()
-                    .with_immediate(arm_asm::SignedImmediate::new(jump_target))
-                    .generate(),
-            );
+        let jump_target =
+            opcode_stream.relative_distance(&write_8_bit_marker.next(), &forward_jump_marker);
 
-            // Save pointers as data here.
-            Trampolines {
-                read_8_bit: read_8_bit_marker,
-                read_16_bit: read_16_bit_marker,
-                write_8_bit: write_8_bit_marker,
-                _write_16_bit: write_16_bit_marker,
-            }
+        opcode_stream.patch_opcode(
+            &forward_jump_marker,
+            arm_asm::Branch::new()
+                .with_immediate(arm_asm::SignedImmediate::new(jump_target))
+                .generate(),
+        );
+
+        // Save pointers as data here.
+        Trampolines {
+            read_8_bit: read_8_bit_marker,
+            read_16_bit: read_16_bit_marker,
+            write_8_bit: write_8_bit_marker,
         }
     }
 
-    fn emit_function_call(opcode_stream: &mut OpCodeStream, target: &Marker) {
-        // Load address of the target trampoline
-        let current_location = opcode_stream.add_marker();
-        let target_relative_distance = opcode_stream.relative_distance(target, &current_location);
-        opcode_stream.patch_opcode(
-            &current_location,
-            arm_asm::LdrLit::new(
-                TRAMPOLIN_TARGET,
-                arm_asm::SignedImmediate::new(target_relative_distance),
-            )
-            .generate(),
-        );
-        // Jump to it (saving the LR)
+    fn emit_context_save(opcode_stream: &mut OpCodeStream) {
         opcode_stream.push_opcode(
             arm_asm::Sub::new(arm_asm::Register::SpZr, arm_asm::Register::SpZr)
                 .with_immediate(Immediate::new(0x10))
                 .generate(),
         );
         opcode_stream.push_opcode(
+            // link register
             arm_asm::Strd::new(arm_asm::Register::X30, arm_asm::Register::SpZr)
                 .with_mode(arm_asm::MemoryAccessMode::UnsignedOffsetImmediate(
                     Immediate::new(0),
@@ -229,12 +179,34 @@ impl Compiler {
                 .generate(),
         );
         opcode_stream.push_opcode(
-            arm_asm::Branch::new()
-                .with_register(TRAMPOLIN_TARGET)
-                .link()
+            // x30 = NZCV
+            arm_asm::Mrs::new(arm_asm::Register::X30, arm_asm::NZCV).generate(),
+        );
+        opcode_stream.push_opcode(
+            // link register
+            arm_asm::Strd::new(arm_asm::Register::X30, arm_asm::Register::SpZr)
+                .with_mode(arm_asm::MemoryAccessMode::UnsignedOffsetImmediate(
+                    Immediate::new(1),
+                ))
+                .generate(),
+        );
+    }
+
+    fn emit_context_restore(opcode_stream: &mut OpCodeStream) {
+        opcode_stream.push_opcode(
+            // link register
+            arm_asm::Ldrd::new(arm_asm::Register::X30, arm_asm::Register::SpZr)
+                .with_mode(arm_asm::MemoryAccessMode::UnsignedOffsetImmediate(
+                    Immediate::new(1),
+                ))
                 .generate(),
         );
         opcode_stream.push_opcode(
+            // NZCV = x30
+            arm_asm::Msr::new(arm_asm::NZCV, arm_asm::Register::X30).generate(),
+        );
+        opcode_stream.push_opcode(
+            // link register
             arm_asm::Ldrd::new(arm_asm::Register::X30, arm_asm::Register::SpZr)
                 .with_mode(arm_asm::MemoryAccessMode::UnsignedOffsetImmediate(
                     Immediate::new(0),
@@ -248,13 +220,37 @@ impl Compiler {
         );
     }
 
+    fn emit_function_call(opcode_stream: &mut OpCodeStream, target: &Trampoline) {
+        Self::emit_context_save(opcode_stream);
+        // Load address of the target trampoline
+        let current_location = opcode_stream.add_marker();
+        let target_relative_distance = opcode_stream.relative_distance(target, &current_location);
+        opcode_stream.patch_opcode(
+            &current_location,
+            arm_asm::LdrLit::new(
+                TRAMPOLIN_TARGET,
+                arm_asm::SignedImmediate::new(target_relative_distance),
+            )
+            .generate(),
+        );
+        // Jump to it (saving the LR)
+        opcode_stream.push_opcode(
+            arm_asm::Branch::new()
+                .with_register(TRAMPOLIN_TARGET)
+                .link()
+                .generate(),
+        );
+        Self::emit_context_restore(opcode_stream);
+    }
+
     fn emit_8_byte_load(
         opcode_stream: &mut OpCodeStream,
         trampolines: &Trampolines,
         target_reg: arm_asm::Register,
         addr_reg: arm_asm::Register,
     ) {
-        opcode_stream.push_opcode(arm_asm::Mov::new(CALL_ARG0, addr_reg).generate());
+        opcode_stream.push_opcode(arm_asm::Mov::new(CALL_ARG0, MEMORY_INTERFACE_REG).generate());
+        opcode_stream.push_opcode(arm_asm::Mov::new(CALL_ARG1, addr_reg).generate());
         Self::emit_function_call(opcode_stream, &trampolines.read_8_bit);
         opcode_stream.push_opcode(arm_asm::Mov::new(target_reg, CALL_RESULT0).generate());
     }
@@ -265,8 +261,9 @@ impl Compiler {
         target_reg: arm_asm::Register,
         address: u16,
     ) {
+        opcode_stream.push_opcode(arm_asm::Mov::new(CALL_ARG0, MEMORY_INTERFACE_REG).generate());
         opcode_stream.push_opcode(
-            arm_asm::Movz::new(CALL_ARG0)
+            arm_asm::Movz::new(CALL_ARG1)
                 .with_immediate(arm_asm::Immediate::new(address as u64))
                 .generate(),
         );
@@ -280,8 +277,9 @@ impl Compiler {
         target_reg: arm_asm::Register,
         address: u16,
     ) {
+        opcode_stream.push_opcode(arm_asm::Mov::new(CALL_ARG0, MEMORY_INTERFACE_REG).generate());
         opcode_stream.push_opcode(
-            arm_asm::Movz::new(CALL_ARG0)
+            arm_asm::Movz::new(CALL_ARG1)
                 .with_immediate(arm_asm::Immediate::new(address as u64))
                 .generate(),
         );
@@ -295,8 +293,9 @@ impl Compiler {
         address_reg: arm_asm::Register,
         data_reg: arm_asm::Register,
     ) {
-        opcode_stream.push_opcode(arm_asm::Mov::new(CALL_ARG0, address_reg).generate());
-        opcode_stream.push_opcode(arm_asm::Mov::new(CALL_ARG1, data_reg).generate());
+        opcode_stream.push_opcode(arm_asm::Mov::new(CALL_ARG0, MEMORY_INTERFACE_REG).generate());
+        opcode_stream.push_opcode(arm_asm::Mov::new(CALL_ARG1, address_reg).generate());
+        opcode_stream.push_opcode(arm_asm::Mov::new(CALL_ARG2, data_reg).generate());
         Self::emit_function_call(opcode_stream, &trampolines.write_8_bit);
     }
 

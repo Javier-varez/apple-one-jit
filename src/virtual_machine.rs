@@ -7,12 +7,8 @@ use crate::{
 core::arch::global_asm!(include_str!("virtual_machine.S"));
 
 extern "C" {
-    #[link_name = "\x01jumpToEmulatedCode"]
-    fn jumpToEmulatedCode(
-        ptr: *const (),
-        state: *mut VmState,
-        memory: *mut &mut dyn MemoryInterface,
-    );
+    #[link_name = "\x01jump_to_emulator"]
+    fn jump_to_emulator(ptr: *const (), state: *mut VmState, memory: *mut ());
 }
 
 #[repr(C)]
@@ -43,15 +39,15 @@ impl From<crate::dynamic_compiler::Error> for Error {
     }
 }
 
-pub struct VirtualMachine<'a> {
-    compiler: Compiler,
-    memory_interface: &'a mut dyn MemoryInterface,
+pub struct VirtualMachine<'a, T: MemoryInterface> {
+    compiler: Compiler<T>,
+    memory_interface: &'a mut T,
     blocks: Vec<(LocationRange, Block)>,
     state: VmState,
 }
 
-impl<'a> VirtualMachine<'a> {
-    pub fn new(interface: &'a mut dyn MemoryInterface) -> Self {
+impl<'a, T: MemoryInterface> VirtualMachine<'a, T> {
+    pub fn new(interface: &'a mut T) -> Self {
         Self {
             compiler: Compiler::new(),
             memory_interface: interface,
@@ -64,10 +60,10 @@ impl<'a> VirtualMachine<'a> {
     pub fn run(&mut self) -> Result<(), Error> {
         let block_idx = self.ensure_block_for_address(self.state.pc as Address)?;
         let (_, block) = &mut self.blocks[block_idx];
-        let memory_iface_ptr: *mut &mut dyn MemoryInterface = &mut self.memory_interface;
+        let memory_iface_ptr: *mut () = self.memory_interface as *mut _ as *mut _;
         unsafe {
             block.run(|ptr| {
-                jumpToEmulatedCode(ptr, &mut self.state as *mut VmState, memory_iface_ptr);
+                jump_to_emulator(ptr, &mut self.state as *mut VmState, memory_iface_ptr);
             })
         };
         Ok(())
@@ -118,18 +114,14 @@ mod test {
     }
 
     impl MemoryInterface for Memory {
-        fn read_8_bits(&self, addr: Address) -> u8 {
+        extern "C" fn read_8_bits(&self, addr: Address) -> u8 {
             self.memory[addr as usize]
         }
-        fn read_16_bits(&self, addr: Address) -> u16 {
+        extern "C" fn read_16_bits(&self, addr: Address) -> u16 {
             (self.memory[addr as usize] as u16) | ((self.memory[addr as usize] as u16) << 8)
         }
-        fn write_8_bits(&mut self, addr: Address, data: u8) {
+        extern "C" fn write_8_bits(&mut self, addr: Address, data: u8) {
             self.memory[addr as usize] = data;
-        }
-        fn write_16_bits(&mut self, addr: Address, data: u16) {
-            self.memory[addr as usize] = (data & 0xff) as u8;
-            self.memory[(addr + 1) as usize] = (data >> 8) as u8;
         }
     }
 

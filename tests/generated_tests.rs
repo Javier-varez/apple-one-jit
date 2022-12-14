@@ -9,22 +9,17 @@ struct Memory<'a> {
 }
 
 impl<'a> MemoryInterface for Memory<'a> {
-    fn read_8_bits(&self, addr: Address) -> u8 {
+    extern "C" fn read_8_bits(&self, addr: Address) -> u8 {
         let mem = self.memory.borrow_mut();
         mem[addr as usize]
     }
-    fn read_16_bits(&self, addr: Address) -> u16 {
+    extern "C" fn read_16_bits(&self, addr: Address) -> u16 {
         let mem = self.memory.borrow();
         (mem[addr as usize] as u16) | ((mem[(addr + 1) as usize] as u16) << 8)
     }
-    fn write_8_bits(&mut self, addr: Address, data: u8) {
+    extern "C" fn write_8_bits(&mut self, addr: Address, data: u8) {
         let mut mem = self.memory.borrow_mut();
         mem[addr as usize] = data;
-    }
-    fn write_16_bits(&mut self, addr: Address, data: u16) {
-        let mut mem = self.memory.borrow_mut();
-        mem[addr as usize] = (data & 0xff) as u8;
-        mem[(addr + 1) as usize] = (data >> 8) as u8;
     }
 }
 
