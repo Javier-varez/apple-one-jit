@@ -40,7 +40,6 @@ impl From<crate::dynamic_compiler::Error> for Error {
 }
 
 pub struct VirtualMachine<'a, T: MemoryInterface> {
-    compiler: Compiler<T>,
     memory_interface: &'a mut T,
     blocks: Vec<(LocationRange, Block)>,
     state: VmState,
@@ -49,7 +48,6 @@ pub struct VirtualMachine<'a, T: MemoryInterface> {
 impl<'a, T: MemoryInterface> VirtualMachine<'a, T> {
     pub fn new(interface: &'a mut T) -> Self {
         Self {
-            compiler: Compiler::new(),
             memory_interface: interface,
             blocks: vec![],
             state: VmState::default(),
@@ -81,9 +79,10 @@ impl<'a, T: MemoryInterface> VirtualMachine<'a, T> {
         }
 
         let mut block = Block::allocate(region::page::size())?;
-        let location = self
-            .compiler
-            .translate_code(&mut block, address, self.memory_interface)?;
+        let location = block.populate(|opcode_stream| {
+            let mut compiler = Compiler::new(opcode_stream, self.memory_interface);
+            compiler.translate_code(address)
+        })?;
         self.blocks.push((location, block));
         Ok(self.blocks.len() - 1)
     }
