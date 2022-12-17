@@ -445,6 +445,13 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
                 .with_immediate(arm_asm::Immediate::new(value as u64))
                 .generate(),
         );
+
+        // Make sure it is actually zero-page
+        self.opcode_stream.push_opcode(
+            arm_asm::And::new(DECODED_OP_REGISTER, DECODED_OP_REGISTER)
+                .with_immediate(arm_asm::Immediate::new(0xff))
+                .generate(),
+        );
     }
 
     /// Takes the operand and makes sure it ends up in register R4 of the host processor
@@ -600,9 +607,9 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
 
     fn emit_store_instruction(&mut self, instruction: &mos6502::Instruction) {
         let source_reg = match instruction.opcode.base_instruction() {
-            mos6502::instructions::BaseInstruction::Lda => ACCUMULATOR_REGISTER,
-            mos6502::instructions::BaseInstruction::Ldx => X_REGISTER,
-            mos6502::instructions::BaseInstruction::Ldy => Y_REGISTER,
+            mos6502::instructions::BaseInstruction::Sta => ACCUMULATOR_REGISTER,
+            mos6502::instructions::BaseInstruction::Stx => X_REGISTER,
+            mos6502::instructions::BaseInstruction::Sty => Y_REGISTER,
             _ => {
                 unreachable!()
             }
@@ -612,7 +619,7 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             instruction.opcode.addressing_mode().operand_type()
                 == mos6502::addressing_modes::OperandType::Memory
         );
-        self.emit_8_byte_store(source_reg, DECODED_OP_REGISTER);
+        self.emit_8_byte_store(DECODED_OP_REGISTER, source_reg);
     }
 
     fn emit_adc_instruction(&mut self, instruction: &mos6502::Instruction) {

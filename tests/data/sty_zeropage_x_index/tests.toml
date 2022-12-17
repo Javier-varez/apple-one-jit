@@ -1,0 +1,7 @@
+[x-zero]
+entry_state = { accumulator = 0, x = 0, y = 0x74, sp = 0, pc = 0x800, flags = [], memory = { 0x34 = [0x00] } }
+exit_state = { accumulator = 0, x = 0, y = 0x74, sp = 0, pc = 0x802, flags = [], memory = { 0x34 = [0x74] } }
+
+[x-val-2]
+entry_state = { accumulator = 0, x = 2, y = 0x74, sp = 0, pc = 0x800, flags = [], memory = { 0x36 = [0x00] } }
+exit_state = { accumulator = 0, x = 2, y = 0x74, sp = 0, pc = 0x802, flags = [], memory = { 0x36 = [0x74] } }

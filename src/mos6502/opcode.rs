@@ -235,7 +235,7 @@ const OPCODES: [Option<OpCode>; 256] = [
     None,                                                             // 0x80
     Some(OpCode::new(
         BaseInstruction::Sta,
-        AddressingMode::IndirectYIndexed,
+        AddressingMode::XIndexedIndirect,
     )), // 0x81
     None,                                                             // 0x82
     None,                                                             // 0x83
@@ -268,7 +268,7 @@ const OPCODES: [Option<OpCode>; 256] = [
     )), // 0x95
     Some(OpCode::new(
         BaseInstruction::Stx,
-        AddressingMode::ZeropageXIndexed,
+        AddressingMode::ZeropageYIndexed,
     )), // 0x96
     None,                                                             // 0x97
     Some(OpCode::new(BaseInstruction::Tya, AddressingMode::Implied)), // 0x98

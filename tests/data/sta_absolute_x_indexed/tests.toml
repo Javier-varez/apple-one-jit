@@ -1,0 +1,11 @@
+[simple]
+entry_state = { accumulator = 0x74, x = 0, y = 0, sp = 0, pc = 0x800, flags = [], memory = { 0x1234 = [0x00] } }
+exit_state = { accumulator = 0x74, x = 0, y = 0, sp = 0, pc = 0x803, flags = [], memory = { 0x1234 = [0x74] } }
+
+[x-val-2]
+entry_state = { accumulator = 0x74, x = 2, y = 0, sp = 0, pc = 0x800, flags = [], memory = { 0x1236 = [0x00] } }
+exit_state = { accumulator = 0x74, x = 2, y = 0, sp = 0, pc = 0x803, flags = [], memory = { 0x1236 = [0x74] } }
+
+[x-overflow]
+entry_state = { accumulator = 0x74, x = 0xff, y = 0, sp = 0, pc = 0x800, flags = [], memory = { 0x1333 = [0x00] } }
+exit_state = { accumulator = 0x74, x = 0xff, y = 0, sp = 0, pc = 0x803, flags = [], memory = { 0x1333 = [0x74] } }
