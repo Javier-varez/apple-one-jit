@@ -1,0 +1,11 @@
+[zero]
+entry_state = { accumulator = 0, x = 0, y = 0, sp = 23, pc = 0x800, flags = ["V", "Z", "N", "C"] , memory = {} }
+exit_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0x801, flags = ["V", "Z", "N", "C"], memory = {} }
+
+[non-zero]
+entry_state = { accumulator = 0, x = 23, y = 0, sp = 0, pc = 0x800, flags = ["V", "Z", "N", "C"] , memory = {} }
+exit_state = { accumulator = 0, x = 23, y = 0, sp = 23, pc = 0x801, flags = ["V", "Z", "N", "C"], memory = {} }
+
+[negative]
+entry_state = { accumulator = 0, x = 0x80, y = 0, sp = 23, pc = 0x800, flags = ["V", "Z", "C"] , memory = {} }
+exit_state = { accumulator = 0, x = 0x80, y = 0, sp = 0x80, pc = 0x801, flags = ["V", "Z", "C"], memory = {} }

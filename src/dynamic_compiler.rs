@@ -615,6 +615,140 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
         self.emit_8_byte_store(source_reg, DECODED_OP_REGISTER);
     }
 
+    fn emit_adc_instruction(&mut self, instruction: &mos6502::Instruction) {
+        self.emit_deref_if_needed(instruction, DECODED_OP_REGISTER);
+        self.opcode_stream
+            .push_opcode(arm_asm::Sxtb::new(ACCUMULATOR_REGISTER, ACCUMULATOR_REGISTER).generate());
+        self.opcode_stream
+            .push_opcode(arm_asm::Sxtb::new(DECODED_OP_REGISTER, DECODED_OP_REGISTER).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::Adc::new(
+                ACCUMULATOR_REGISTER,
+                ACCUMULATOR_REGISTER,
+                DECODED_OP_REGISTER,
+            )
+            .update_flags()
+            .with_op_size(arm_asm::OpSize::Size32)
+            .generate(),
+        );
+        self.opcode_stream
+            .push_opcode(arm_asm::SetF8::new(ACCUMULATOR_REGISTER).generate());
+    }
+
+    fn emit_and_instruction(&mut self, instruction: &mos6502::Instruction) {
+        self.emit_deref_if_needed(instruction, DECODED_OP_REGISTER);
+
+        let saved_flags = [mos6502::Flags::C, mos6502::Flags::V];
+        self.emit_save_flags(&saved_flags);
+
+        self.opcode_stream.push_opcode(
+            arm_asm::And::new(ACCUMULATOR_REGISTER, ACCUMULATOR_REGISTER)
+                .with_shifted_reg(DECODED_OP_REGISTER)
+                .generate(),
+        );
+        self.opcode_stream
+            .push_opcode(arm_asm::SetF8::new(ACCUMULATOR_REGISTER).generate());
+
+        self.emit_restore_flags(&saved_flags);
+    }
+
+    fn emit_ora_instruction(&mut self, instruction: &mos6502::Instruction) {
+        let saved_flags = [mos6502::Flags::C, mos6502::Flags::V];
+        self.emit_save_flags(&saved_flags);
+
+        self.emit_deref_if_needed(instruction, DECODED_OP_REGISTER);
+        self.opcode_stream.push_opcode(
+            arm_asm::Or::new(ACCUMULATOR_REGISTER, ACCUMULATOR_REGISTER)
+                .with_shifted_reg(DECODED_OP_REGISTER)
+                .generate(),
+        );
+        self.opcode_stream
+            .push_opcode(arm_asm::SetF8::new(ACCUMULATOR_REGISTER).generate());
+
+        self.emit_restore_flags(&saved_flags);
+    }
+
+    fn emit_eor_instruction(&mut self, instruction: &mos6502::Instruction) {
+        let saved_flags = [mos6502::Flags::C, mos6502::Flags::V];
+        self.emit_save_flags(&saved_flags);
+
+        self.emit_deref_if_needed(instruction, DECODED_OP_REGISTER);
+        self.opcode_stream.push_opcode(
+            arm_asm::Xor::new(ACCUMULATOR_REGISTER, ACCUMULATOR_REGISTER)
+                .with_shifted_reg(DECODED_OP_REGISTER)
+                .generate(),
+        );
+        self.opcode_stream
+            .push_opcode(arm_asm::SetF8::new(ACCUMULATOR_REGISTER).generate());
+
+        self.emit_restore_flags(&saved_flags);
+    }
+
+    fn emit_tax_instruction(&mut self) {
+        let saved_flags = [mos6502::Flags::C, mos6502::Flags::V];
+        self.emit_save_flags(&saved_flags);
+
+        self.opcode_stream
+            .push_opcode(arm_asm::Mov::new(X_REGISTER, ACCUMULATOR_REGISTER).generate());
+        self.opcode_stream
+            .push_opcode(arm_asm::SetF8::new(X_REGISTER).generate());
+
+        self.emit_restore_flags(&saved_flags);
+    }
+
+    fn emit_tay_instruction(&mut self) {
+        let saved_flags = [mos6502::Flags::C, mos6502::Flags::V];
+        self.emit_save_flags(&saved_flags);
+
+        self.opcode_stream
+            .push_opcode(arm_asm::Mov::new(Y_REGISTER, ACCUMULATOR_REGISTER).generate());
+        self.opcode_stream
+            .push_opcode(arm_asm::SetF8::new(Y_REGISTER).generate());
+
+        self.emit_restore_flags(&saved_flags);
+    }
+
+    fn emit_tsx_instruction(&mut self) {
+        let saved_flags = [mos6502::Flags::C, mos6502::Flags::V];
+        self.emit_save_flags(&saved_flags);
+
+        self.opcode_stream
+            .push_opcode(arm_asm::Mov::new(X_REGISTER, SP_REGISTER).generate());
+        self.opcode_stream
+            .push_opcode(arm_asm::SetF8::new(X_REGISTER).generate());
+
+        self.emit_restore_flags(&saved_flags);
+    }
+
+    fn emit_txa_instruction(&mut self) {
+        let saved_flags = [mos6502::Flags::C, mos6502::Flags::V];
+        self.emit_save_flags(&saved_flags);
+
+        self.opcode_stream
+            .push_opcode(arm_asm::Mov::new(ACCUMULATOR_REGISTER, X_REGISTER).generate());
+        self.opcode_stream
+            .push_opcode(arm_asm::SetF8::new(ACCUMULATOR_REGISTER).generate());
+
+        self.emit_restore_flags(&saved_flags);
+    }
+
+    fn emit_txs_instruction(&mut self) {
+        self.opcode_stream
+            .push_opcode(arm_asm::Mov::new(SP_REGISTER, X_REGISTER).generate());
+    }
+
+    fn emit_tya_instruction(&mut self) {
+        let saved_flags = [mos6502::Flags::C, mos6502::Flags::V];
+        self.emit_save_flags(&saved_flags);
+
+        self.opcode_stream
+            .push_opcode(arm_asm::Mov::new(ACCUMULATOR_REGISTER, Y_REGISTER).generate());
+        self.opcode_stream
+            .push_opcode(arm_asm::SetF8::new(ACCUMULATOR_REGISTER).generate());
+
+        self.emit_restore_flags(&saved_flags);
+    }
+
     /// Handles the actual instruction, assuming that the decoded operand is available in DECODED_OP_REGISTER
     fn emit_instruction(&mut self, instruction: &mos6502::Instruction) {
         match instruction.opcode.base_instruction() {
@@ -637,79 +771,34 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
                 self.emit_store_instruction(instruction);
             }
             mos6502::instructions::BaseInstruction::Adc => {
-                self.emit_deref_if_needed(instruction, DECODED_OP_REGISTER);
-                self.opcode_stream.push_opcode(
-                    arm_asm::Sxtb::new(ACCUMULATOR_REGISTER, ACCUMULATOR_REGISTER).generate(),
-                );
-                self.opcode_stream.push_opcode(
-                    arm_asm::Sxtb::new(DECODED_OP_REGISTER, DECODED_OP_REGISTER).generate(),
-                );
-                self.opcode_stream.push_opcode(
-                    arm_asm::Adc::new(
-                        ACCUMULATOR_REGISTER,
-                        ACCUMULATOR_REGISTER,
-                        DECODED_OP_REGISTER,
-                    )
-                    .update_flags()
-                    .with_op_size(arm_asm::OpSize::Size32)
-                    .generate(),
-                );
-                self.opcode_stream
-                    .push_opcode(arm_asm::SetF8::new(ACCUMULATOR_REGISTER).generate());
+                self.emit_adc_instruction(instruction);
             }
             mos6502::instructions::BaseInstruction::And => {
-                self.emit_deref_if_needed(instruction, DECODED_OP_REGISTER);
-                self.opcode_stream.push_opcode(
-                    arm_asm::And::new(ACCUMULATOR_REGISTER, ACCUMULATOR_REGISTER)
-                        .with_shifted_reg(DECODED_OP_REGISTER)
-                        .generate(),
-                );
+                self.emit_and_instruction(instruction);
             }
             mos6502::instructions::BaseInstruction::Ora => {
-                self.emit_deref_if_needed(instruction, DECODED_OP_REGISTER);
-                self.opcode_stream.push_opcode(
-                    arm_asm::Or::new(ACCUMULATOR_REGISTER, ACCUMULATOR_REGISTER)
-                        .with_shifted_reg(DECODED_OP_REGISTER)
-                        .generate(),
-                );
+                self.emit_ora_instruction(instruction);
             }
             mos6502::instructions::BaseInstruction::Eor => {
-                self.emit_deref_if_needed(instruction, DECODED_OP_REGISTER);
-                self.opcode_stream.push_opcode(
-                    arm_asm::Xor::new(ACCUMULATOR_REGISTER, ACCUMULATOR_REGISTER)
-                        .with_shifted_reg(DECODED_OP_REGISTER)
-                        .generate(),
-                );
+                self.emit_eor_instruction(instruction);
             }
             mos6502::instructions::BaseInstruction::Tax => {
-                // TODO(javier-varez): Update flags
-                self.opcode_stream
-                    .push_opcode(arm_asm::Mov::new(X_REGISTER, ACCUMULATOR_REGISTER).generate());
+                self.emit_tax_instruction();
             }
             mos6502::instructions::BaseInstruction::Tay => {
-                // TODO(javier-varez): Update flags
-                self.opcode_stream
-                    .push_opcode(arm_asm::Mov::new(Y_REGISTER, ACCUMULATOR_REGISTER).generate());
+                self.emit_tay_instruction();
             }
             mos6502::instructions::BaseInstruction::Tsx => {
-                // TODO(javier-varez): Update flags
-                self.opcode_stream
-                    .push_opcode(arm_asm::Mov::new(X_REGISTER, SP_REGISTER).generate());
+                self.emit_tsx_instruction();
             }
             mos6502::instructions::BaseInstruction::Txa => {
-                // TODO(javier-varez): Update flags
-                self.opcode_stream
-                    .push_opcode(arm_asm::Mov::new(ACCUMULATOR_REGISTER, X_REGISTER).generate());
+                self.emit_txa_instruction();
             }
             mos6502::instructions::BaseInstruction::Tya => {
-                // TODO(javier-varez): Update flags
-                self.opcode_stream
-                    .push_opcode(arm_asm::Mov::new(ACCUMULATOR_REGISTER, Y_REGISTER).generate());
+                self.emit_tya_instruction();
             }
             mos6502::instructions::BaseInstruction::Txs => {
-                // TODO(javier-varez): Update flags
-                self.opcode_stream
-                    .push_opcode(arm_asm::Mov::new(SP_REGISTER, X_REGISTER).generate());
+                self.emit_txs_instruction();
             }
             mos6502::instructions::BaseInstruction::Rts => {
                 // TODO(javier-varez): Pop pc from stack and set it before actually returning

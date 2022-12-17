@@ -1,0 +1,11 @@
+[preserve-all]
+entry_state = { accumulator = 0xA5, x = 0, y = 0, sp = 0, pc = 0x800, flags = [] , memory = { 0x0f = [0xA5] } }
+exit_state = { accumulator = 0xA5, x = 0, y = 0, sp = 0, pc = 0x802, flags = ['N'] , memory = { 0x0f = [0xA5] } }
+
+[preserve-none]
+entry_state = { accumulator = 0x5A, x = 0, y = 0, sp = 0, pc = 0x800, flags = [] , memory = { 0x0f = [0xA5] } }
+exit_state = { accumulator = 0x00, x = 0, y = 0, sp = 0, pc = 0x802, flags = ['Z'] , memory = { 0x0f = [0xA5] } }
+
+[preserve-some]
+entry_state = { accumulator = 0xAA, x = 0, y = 0, sp = 0, pc = 0x800, flags = [] , memory = { 0x0f = [0xA5] } }
+exit_state = { accumulator = 0xA0, x = 0, y = 0, sp = 0, pc = 0x802, flags = ['N'] , memory = { 0x0f = [0xA5] } }
