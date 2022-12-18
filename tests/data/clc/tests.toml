@@ -1,0 +1,11 @@
+[all-set]
+entry_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0x800, flags = ["C", "Z", "N", "V"]  }
+exit_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0x801, flags = ["Z", "N", "V"] }
+
+[some-set]
+entry_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0x800, flags = ["C", "Z"]  }
+exit_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0x801, flags = ["Z"] }
+
+[none-set]
+entry_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0x800, flags = []  }
+exit_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0x801, flags = [] }

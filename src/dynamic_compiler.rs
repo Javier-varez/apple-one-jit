@@ -365,7 +365,7 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
         );
         self.opcode_stream.push_opcode(
             arm_asm::And::new(SCRATCH_REGISTER, SCRATCH_REGISTER)
-                .with_immediate(arm_asm::Immediate::new(0xff))
+                .with_immediate(arm_asm::Immediate::new(u8::MAX.into()))
                 .generate(),
         );
         self.emit_8_byte_load(DECODED_OP_REGISTER, SCRATCH_REGISTER);
@@ -376,7 +376,7 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
         );
         self.opcode_stream.push_opcode(
             arm_asm::And::new(SCRATCH_REGISTER, SCRATCH_REGISTER)
-                .with_immediate(arm_asm::Immediate::new(0xff))
+                .with_immediate(arm_asm::Immediate::new(u8::MAX.into()))
                 .generate(),
         );
         self.emit_8_byte_load(SCRATCH_REGISTER, SCRATCH_REGISTER);
@@ -394,10 +394,10 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
                 };
 
         // (u8 operand) => addr in zero page + y reg => the address we want
-        if value == 0xff {
+        if value == u8::MAX {
             // We have wraparound and needs special handling
-            self.emit_8_byte_load_immediate_addr(DECODED_OP_REGISTER, 0xff);
-            self.emit_8_byte_load_immediate_addr(SCRATCH_REGISTER, 0x00);
+            self.emit_8_byte_load_immediate_addr(DECODED_OP_REGISTER, u8::MAX.into());
+            self.emit_8_byte_load_immediate_addr(SCRATCH_REGISTER, u8::MIN.into());
             self.opcode_stream.push_opcode(
                 arm_asm::Add::new(DECODED_OP_REGISTER, DECODED_OP_REGISTER)
                     .with_shifted_reg(SCRATCH_REGISTER)
@@ -449,7 +449,7 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
         // Make sure it is actually zero-page
         self.opcode_stream.push_opcode(
             arm_asm::And::new(DECODED_OP_REGISTER, DECODED_OP_REGISTER)
-                .with_immediate(arm_asm::Immediate::new(0xff))
+                .with_immediate(arm_asm::Immediate::new(u8::MAX.into()))
                 .generate(),
         );
     }
@@ -526,7 +526,7 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
     }
 
     fn inverted_flags_mask(flags: &[mos6502::Flags]) -> u64 {
-        Self::flags_mask(flags) ^ 0xF000_0000
+        Self::flags_mask(flags) ^ 0xFFFF_FFFF_FFFF_FFFF
     }
 
     // NOTE: this function uses the SCRATCH_REGISTER and SCRATCH_REGISTER_2, must not be overwritten
@@ -640,6 +640,11 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
         );
         self.opcode_stream
             .push_opcode(arm_asm::SetF8::new(ACCUMULATOR_REGISTER).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::And::new(ACCUMULATOR_REGISTER, ACCUMULATOR_REGISTER)
+                .with_immediate(arm_asm::Immediate::new(0xFF))
+                .generate(),
+        );
     }
 
     fn emit_and_instruction(&mut self, instruction: &mos6502::Instruction) {
@@ -756,6 +761,38 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
         self.emit_restore_flags(&saved_flags);
     }
 
+    fn emit_clc_instruction(&mut self) {
+        self.opcode_stream
+            .push_opcode(arm_asm::Mrs::new(SCRATCH_REGISTER, arm_asm::NZCV).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::And::new(SCRATCH_REGISTER, SCRATCH_REGISTER)
+                .with_immediate(arm_asm::Immediate::new(Self::inverted_flags_mask(&[
+                    mos6502::Flags::C,
+                ])))
+                .generate(),
+        );
+        self.opcode_stream
+            .push_opcode(arm_asm::Msr::new(arm_asm::NZCV, SCRATCH_REGISTER).generate());
+    }
+
+    fn emit_cld_instruction(&mut self) {
+        // Decimal mode is not supported, therefore there's nothing to do here
+    }
+
+    fn emit_clv_instruction(&mut self) {
+        self.opcode_stream
+            .push_opcode(arm_asm::Mrs::new(SCRATCH_REGISTER, arm_asm::NZCV).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::And::new(SCRATCH_REGISTER, SCRATCH_REGISTER)
+                .with_immediate(arm_asm::Immediate::new(Self::inverted_flags_mask(&[
+                    mos6502::Flags::V,
+                ])))
+                .generate(),
+        );
+        self.opcode_stream
+            .push_opcode(arm_asm::Msr::new(arm_asm::NZCV, SCRATCH_REGISTER).generate());
+    }
+
     /// Handles the actual instruction, assuming that the decoded operand is available in DECODED_OP_REGISTER
     fn emit_instruction(&mut self, instruction: &mos6502::Instruction) {
         match instruction.opcode.base_instruction() {
@@ -806,6 +843,15 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             }
             mos6502::instructions::BaseInstruction::Txs => {
                 self.emit_txs_instruction();
+            }
+            mos6502::instructions::BaseInstruction::Clc => {
+                self.emit_clc_instruction();
+            }
+            mos6502::instructions::BaseInstruction::Cld => {
+                self.emit_cld_instruction();
+            }
+            mos6502::instructions::BaseInstruction::Clv => {
+                self.emit_clv_instruction();
             }
             mos6502::instructions::BaseInstruction::Rts => {
                 // TODO(javier-varez): Pop pc from stack and set it before actually returning

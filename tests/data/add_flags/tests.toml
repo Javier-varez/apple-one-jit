@@ -4,7 +4,7 @@ exit_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0x802, flags = ["C", 
 
 [overflow-flag-is-set]
 entry_state = { accumulator = 0x80, x = 0, y = 0, sp = 0, pc = 0x800, flags = [], memory = { 0 = [0x80] } }
-exit_state = { accumulator = 0xffffff00, x = 0, y = 0, sp = 0, pc = 0x802, flags = ["C", "V", "Z"], memory = { 0 = [0x80] } }
+exit_state = { accumulator = 0x00, x = 0, y = 0, sp = 0, pc = 0x802, flags = ["C", "V", "Z"], memory = { 0 = [0x80] } }
 
 [carry-is-added]
 entry_state = { accumulator = 0x7f, x = 0, y = 0, sp = 0, pc = 0x800, flags = ["C"] }
