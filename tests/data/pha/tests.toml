@@ -1,0 +1,7 @@
+[push-accumulator]
+entry_state = { accumulator = 0x84, x = 0, y = 0, sp = 0xff, pc = 0x800, flags = ["N", "C", "V", "Z"], memory = { 0x1ff = [0] } }
+exit_state = { accumulator = 0x84, x = 0, y = 0, sp = 0xfe, pc = 0x801, flags = ["N", "C", "V", "Z"], memory = { 0x1ff = [0x84] } }
+
+[wraparound]
+entry_state = { accumulator = 0x84, x = 0, y = 0, sp = 0x00, pc = 0x800, flags = [], memory = { 0x100 = [0] } }
+exit_state = { accumulator = 0x84, x = 0, y = 0, sp = 0xff, pc = 0x801, flags = [], memory = { 0x100 = [0x84] } }

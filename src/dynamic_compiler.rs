@@ -888,6 +888,65 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
         );
     }
 
+    fn emit_pha_instruction(&mut self) {
+        // Call write_8_bit function
+        self.opcode_stream
+            .push_opcode(arm_asm::Mov::new(CALL_ARG0, MEMORY_INTERFACE_REG).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::Or::new(CALL_ARG1, SP_REGISTER)
+                .with_immediate(Immediate::new(0x100))
+                .generate(),
+        );
+        self.opcode_stream
+            .push_opcode(arm_asm::Mov::new(CALL_ARG2, ACCUMULATOR_REGISTER).generate());
+        self.emit_function_call(self.trampolines.write_8_bit.clone());
+
+        // Decrement sp with wraparound
+        self.opcode_stream.push_opcode(
+            arm_asm::Sub::new(SP_REGISTER, SP_REGISTER)
+                .with_immediate(Immediate::new(1))
+                .generate(),
+        );
+        self.opcode_stream.push_opcode(
+            arm_asm::And::new(SP_REGISTER, SP_REGISTER)
+                .with_immediate(Immediate::new(0xff))
+                .generate(),
+        );
+    }
+
+    fn emit_pla_instruction(&mut self) {
+        // Increment sp with wraparound
+        self.opcode_stream.push_opcode(
+            arm_asm::Add::new(SP_REGISTER, SP_REGISTER)
+                .with_immediate(Immediate::new(1))
+                .generate(),
+        );
+        self.opcode_stream.push_opcode(
+            arm_asm::And::new(SP_REGISTER, SP_REGISTER)
+                .with_immediate(Immediate::new(0xff))
+                .generate(),
+        );
+
+        // Call read_8_bit function
+        self.opcode_stream
+            .push_opcode(arm_asm::Mov::new(CALL_ARG0, MEMORY_INTERFACE_REG).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::Or::new(CALL_ARG1, SP_REGISTER)
+                .with_immediate(Immediate::new(0x100))
+                .generate(),
+        );
+        self.emit_function_call(self.trampolines.read_8_bit.clone());
+        self.opcode_stream
+            .push_opcode(arm_asm::Mov::new(ACCUMULATOR_REGISTER, CALL_RESULT0).generate());
+
+        // Update flags
+        let saved_flags = &[mos6502::Flags::C, mos6502::Flags::V];
+        self.emit_save_flags(saved_flags);
+        self.opcode_stream
+            .push_opcode(arm_asm::SetF8::new(ACCUMULATOR_REGISTER).generate());
+        self.emit_restore_flags(saved_flags);
+    }
+
     /// Handles the actual instruction, assuming that the decoded operand is available in DECODED_OP_REGISTER
     fn emit_instruction(&mut self, instruction: &mos6502::Instruction) {
         match instruction.opcode.base_instruction() {
@@ -953,6 +1012,12 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             }
             mos6502::instructions::BaseInstruction::Bit => {
                 self.emit_bit_instruction();
+            }
+            mos6502::instructions::BaseInstruction::Pha => {
+                self.emit_pha_instruction();
+            }
+            mos6502::instructions::BaseInstruction::Pla => {
+                self.emit_pla_instruction();
             }
             mos6502::instructions::BaseInstruction::Rts => {
                 // TODO(javier-varez): Pop pc from stack and set it before actually returning
