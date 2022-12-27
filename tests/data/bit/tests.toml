@@ -1,0 +1,23 @@
+[test-n-and-z-flag]
+entry_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0x800, flags = ["V", "C"], memory = { 0x10 = [0x80] } }
+exit_state = { accumulator = 0, x = 0, y = 0, sp = 0, pc = 0x802, flags = ["N", "Z", "C"], memory = { 0x10 = [0x80] } }
+
+[test-n-flag]
+entry_state = { accumulator = 0xff, x = 0, y = 0, sp = 0, pc = 0x800, flags = ["V", "C"], memory = { 0x10 = [0x80] } }
+exit_state = { accumulator = 0xff, x = 0, y = 0, sp = 0, pc = 0x802, flags = ["N", "C"], memory = { 0x10 = [0x80] } }
+
+[test-z-flag]
+entry_state = { accumulator = 0xff, x = 0, y = 0, sp = 0, pc = 0x800, flags = ["V", "C"], memory = { 0x10 = [0x00] } }
+exit_state = { accumulator = 0xff, x = 0, y = 0, sp = 0, pc = 0x802, flags = ["Z", "C"], memory = { 0x10 = [0x00] } }
+
+[test-v-flag]
+entry_state = { accumulator = 0xff, x = 0, y = 0, sp = 0, pc = 0x800, flags = ["V", "C"], memory = { 0x10 = [0x40] } }
+exit_state = { accumulator = 0xff, x = 0, y = 0, sp = 0, pc = 0x802, flags = ["V", "C"], memory = { 0x10 = [0x40] } }
+
+[test-no-flags]
+entry_state = { accumulator = 0xff, x = 0, y = 0, sp = 0, pc = 0x800, flags = ["N", "Z", "V", "C"], memory = { 0x10 = [0x3f] } }
+exit_state = { accumulator = 0xff, x = 0, y = 0, sp = 0, pc = 0x802, flags = ["C"], memory = { 0x10 = [0x3f] } }
+
+[test-no-flags2]
+entry_state = { accumulator = 0xff, x = 0, y = 0, sp = 0, pc = 0x800, flags = ["N", "Z", "V"], memory = { 0x10 = [0x3f] } }
+exit_state = { accumulator = 0xff, x = 0, y = 0, sp = 0, pc = 0x802, flags = [], memory = { 0x10 = [0x3f] } }

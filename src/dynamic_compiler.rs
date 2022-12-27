@@ -775,10 +775,6 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             .push_opcode(arm_asm::Msr::new(arm_asm::NZCV, SCRATCH_REGISTER).generate());
     }
 
-    fn emit_cld_instruction(&mut self) {
-        // Decimal mode is not supported, therefore there's nothing to do here
-    }
-
     fn emit_clv_instruction(&mut self) {
         self.opcode_stream
             .push_opcode(arm_asm::Mrs::new(SCRATCH_REGISTER, arm_asm::NZCV).generate());
@@ -791,6 +787,105 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
         );
         self.opcode_stream
             .push_opcode(arm_asm::Msr::new(arm_asm::NZCV, SCRATCH_REGISTER).generate());
+    }
+
+    fn emit_bit_instruction(&mut self) {
+        self.emit_8_byte_load(DECODED_OP_REGISTER, DECODED_OP_REGISTER);
+
+        self.opcode_stream
+            .push_opcode(arm_asm::Mrs::new(SCRATCH_REGISTER, arm_asm::NZCV).generate());
+
+        // Keep only carry
+        self.opcode_stream.push_opcode(
+            arm_asm::And::new(SCRATCH_REGISTER, SCRATCH_REGISTER)
+                .with_immediate(Immediate::new(Self::flags_mask(&[mos6502::Flags::C])))
+                .generate(),
+        );
+
+        self.opcode_stream.push_opcode(
+            arm_asm::And::new(SCRATCH_REGISTER_2, DECODED_OP_REGISTER)
+                .with_immediate(Immediate::new(1 << 7))
+                .generate(),
+        );
+        self.opcode_stream
+            .push_opcode(arm_asm::SetF8::new(SCRATCH_REGISTER_2).generate());
+
+        let branch_to_bit6_marker = self.opcode_stream.add_marker();
+
+        self.opcode_stream.push_opcode(
+            arm_asm::Or::new(SCRATCH_REGISTER, SCRATCH_REGISTER)
+                .with_immediate(Immediate::new(Self::flags_mask(&[mos6502::Flags::N])))
+                .generate(),
+        );
+
+        let bit6_marker = self.opcode_stream.push_opcode(
+            arm_asm::And::new(SCRATCH_REGISTER_2, DECODED_OP_REGISTER)
+                .with_immediate(Immediate::new(1 << 6))
+                .generate(),
+        );
+        self.opcode_stream
+            .push_opcode(arm_asm::SetF8::new(SCRATCH_REGISTER_2).generate());
+
+        self.opcode_stream.patch_opcode(
+            &branch_to_bit6_marker,
+            arm_asm::Branch::new()
+                .with_immediate(arm_asm::SignedImmediate::new(
+                    self.opcode_stream
+                        .relative_distance(&bit6_marker, &branch_to_bit6_marker),
+                ))
+                .iff(arm_asm::Condition::Eq)
+                .generate(),
+        );
+
+        let branch_to_zero_marker = self.opcode_stream.add_marker();
+
+        self.opcode_stream.push_opcode(
+            arm_asm::Or::new(SCRATCH_REGISTER, SCRATCH_REGISTER)
+                .with_immediate(Immediate::new(Self::flags_mask(&[mos6502::Flags::V])))
+                .generate(),
+        );
+
+        let zero_marker = self.opcode_stream.push_opcode(
+            arm_asm::And::new(SCRATCH_REGISTER_2, DECODED_OP_REGISTER)
+                .with_shifted_reg(ACCUMULATOR_REGISTER)
+                .generate(),
+        );
+        self.opcode_stream
+            .push_opcode(arm_asm::SetF8::new(SCRATCH_REGISTER_2).generate());
+
+        self.opcode_stream.patch_opcode(
+            &branch_to_zero_marker,
+            arm_asm::Branch::new()
+                .with_immediate(arm_asm::SignedImmediate::new(
+                    self.opcode_stream
+                        .relative_distance(&zero_marker, &branch_to_zero_marker),
+                ))
+                .iff(arm_asm::Condition::Eq)
+                .generate(),
+        );
+
+        let branch_to_set_nzvc = self.opcode_stream.add_marker();
+
+        self.opcode_stream.push_opcode(
+            arm_asm::Or::new(SCRATCH_REGISTER, SCRATCH_REGISTER)
+                .with_immediate(Immediate::new(Self::flags_mask(&[mos6502::Flags::Z])))
+                .generate(),
+        );
+
+        let set_nzvc_marker = self
+            .opcode_stream
+            .push_opcode(arm_asm::Msr::new(arm_asm::NZCV, SCRATCH_REGISTER).generate());
+
+        self.opcode_stream.patch_opcode(
+            &branch_to_set_nzvc,
+            arm_asm::Branch::new()
+                .with_immediate(arm_asm::SignedImmediate::new(
+                    self.opcode_stream
+                        .relative_distance(&set_nzvc_marker, &branch_to_set_nzvc),
+                ))
+                .iff(arm_asm::Condition::Ne)
+                .generate(),
+        );
     }
 
     /// Handles the actual instruction, assuming that the decoded operand is available in DECODED_OP_REGISTER
@@ -848,10 +943,16 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
                 self.emit_clc_instruction();
             }
             mos6502::instructions::BaseInstruction::Cld => {
-                self.emit_cld_instruction();
+                // Decimal mode is not supported, therefore there's nothing to do here
+            }
+            mos6502::instructions::BaseInstruction::Sed => {
+                unimplemented!("Decimal mode not supported");
             }
             mos6502::instructions::BaseInstruction::Clv => {
                 self.emit_clv_instruction();
+            }
+            mos6502::instructions::BaseInstruction::Bit => {
+                self.emit_bit_instruction();
             }
             mos6502::instructions::BaseInstruction::Rts => {
                 // TODO(javier-varez): Pop pc from stack and set it before actually returning
