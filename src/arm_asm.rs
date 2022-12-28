@@ -1349,3 +1349,178 @@ impl Mrs {
         )
     }
 }
+
+mod bitfield {
+    use super::*;
+
+    pub enum Mode {
+        Sbfm = 0,
+        Bfm = 1,
+        Ubfm = 2,
+    }
+
+    pub struct BitfieldMove<const MODE: u8> {
+        dest_reg: Register,
+        source_reg: Register,
+        imms: Immediate<6>,
+        immr: Immediate<6>,
+        op_size: OpSize,
+    }
+
+    impl<const MODE: u8> BitfieldMove<MODE> {
+        pub fn new(
+            dest_reg: Register,
+            source_reg: Register,
+            imms: Immediate<6>,
+            immr: Immediate<6>,
+        ) -> Self {
+            Self {
+                dest_reg,
+                source_reg,
+                imms,
+                immr,
+                op_size: OpSize::Size64,
+            }
+        }
+
+        /// Sets the size of the operation. 32 bits will use wX registers, 64 bits will use xX regs
+        /// Defaults to 64 bits if not called
+        pub fn with_op_size(mut self, op_size: OpSize) -> Self {
+            self.op_size = op_size;
+            self
+        }
+
+        fn size_encoding(&self) -> u32 {
+            const N_OFFSET: usize = 22;
+            const SF_OFFSET: usize = 31;
+
+            match self.op_size {
+                OpSize::Size32 => 0,
+                OpSize::Size64 => (1 << N_OFFSET) | (1 << SF_OFFSET),
+            }
+        }
+
+        pub fn generate(self) -> OpCode {
+            const OPCODE_BASE: u32 = 0x1300_0000;
+            const MODE_OFFSET: usize = 29;
+            const REG_SRC_OFFSET: usize = 5;
+            const REG_DST_OFFSET: usize = 0;
+            const IMMS_OFFSET: usize = 10;
+            const IMMR_OFFSET: usize = 16;
+            OpCode(
+                OPCODE_BASE
+                    | self.size_encoding()
+                    | ((MODE as u32) << MODE_OFFSET)
+                    | ((self.source_reg as u32) << REG_SRC_OFFSET)
+                    | ((self.dest_reg as u32) << REG_DST_OFFSET)
+                    | ((self.imms.0 as u32) << IMMS_OFFSET)
+                    | ((self.immr.0 as u32) << IMMR_OFFSET),
+            )
+        }
+    }
+}
+
+pub type Ubfm = bitfield::BitfieldMove<{ bitfield::Mode::Ubfm as u8 }>;
+
+pub type Bfm = bitfield::BitfieldMove<{ bitfield::Mode::Bfm as u8 }>;
+
+pub type Sbfm = bitfield::BitfieldMove<{ bitfield::Mode::Sbfm as u8 }>;
+
+pub struct Asr {
+    dest_reg: Register,
+    source_reg: Register,
+    shift: Immediate<6>,
+    op_size: OpSize,
+}
+
+impl Asr {
+    pub fn new(dest_reg: Register, source_reg: Register, shift: Immediate<6>) -> Self {
+        Self {
+            dest_reg,
+            source_reg,
+            shift,
+            op_size: OpSize::Size64,
+        }
+    }
+
+    pub fn generate(self) -> OpCode {
+        let imms = Immediate::new(match self.op_size {
+            OpSize::Size32 => 0x1f,
+            OpSize::Size64 => 0x3f,
+        });
+
+        Sbfm::new(self.dest_reg, self.source_reg, imms, self.shift)
+            .with_op_size(self.op_size)
+            .generate()
+    }
+}
+
+pub struct Lsr {
+    dest_reg: Register,
+    source_reg: Register,
+    shift: Immediate<6>,
+    op_size: OpSize,
+}
+
+impl Lsr {
+    pub fn new(dest_reg: Register, source_reg: Register, shift: Immediate<6>) -> Self {
+        Self {
+            dest_reg,
+            source_reg,
+            shift,
+            op_size: OpSize::Size64,
+        }
+    }
+
+    pub fn generate(self) -> OpCode {
+        let imms = Immediate::new(match self.op_size {
+            OpSize::Size32 => 0x1f,
+            OpSize::Size64 => 0x3f,
+        });
+
+        Ubfm::new(self.dest_reg, self.source_reg, imms, self.shift)
+            .with_op_size(self.op_size)
+            .generate()
+    }
+}
+
+pub struct Lsl {
+    dest_reg: Register,
+    source_reg: Register,
+    shift: Immediate<6>,
+    op_size: OpSize,
+}
+
+impl Lsl {
+    pub fn new(dest_reg: Register, source_reg: Register, shift: Immediate<6>) -> Self {
+        Self {
+            dest_reg,
+            source_reg,
+            shift,
+            op_size: OpSize::Size64,
+        }
+    }
+
+    pub fn generate(self) -> OpCode {
+        let neg_shift = (!self.shift.0).wrapping_add(1);
+        let imms = Immediate::new(match self.op_size {
+            OpSize::Size32 => 31 - self.shift.0,
+            OpSize::Size64 => 63 - self.shift.0,
+        });
+        let immr = Immediate::new(match self.op_size {
+            OpSize::Size32 => neg_shift % 32,
+            OpSize::Size64 => neg_shift % 64,
+        });
+
+        println!(
+            "Shift {shift}, imms {imms}, immr {immr}",
+            shift = self.shift.0,
+            imms = imms.0,
+            immr = immr.0
+        );
+
+        Ubfm::new(self.dest_reg, self.source_reg, imms, immr)
+            .with_op_size(self.op_size)
+            .generate()
+    }
+}

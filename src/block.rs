@@ -178,8 +178,8 @@ impl LocationRange {
 mod test {
     use super::*;
     use crate::arm_asm::{
-        Adc, Add, And, Branch, Condition, Immediate, LdrLit, Ldrd, MemoryAccessMode, Mov, MovShift,
-        Movk, Movn, Movz, Mrs, Msr, OpSize, Or, RegShift, Register, Ret, Sbc, SetF8,
+        Adc, Add, And, Asr, Branch, Condition, Immediate, LdrLit, Ldrd, Lsl, Lsr, MemoryAccessMode,
+        Mov, MovShift, Movk, Movn, Movz, Mrs, Msr, OpSize, Or, RegShift, Register, Ret, Sbc, SetF8,
         SignedImmediate, Strd, Sub, Sxtb, Xor, NZCV,
     };
     use region::page;
@@ -1148,5 +1148,62 @@ mod test {
         let func: fn() = || println!("Call happens!");
         let val = unsafe { invoke!(block, extern "C" fn(fn()) -> u16, func) };
         assert_eq!(val, 0x1234);
+    }
+
+    #[test]
+    fn test_lsl() {
+        let mut block = Block::allocate(page::size()).unwrap();
+
+        for shift in 0..63 {
+            block.populate(|opcode_stream| {
+                opcode_stream.push_opcode(
+                    Lsl::new(Register::X0, Register::X0, Immediate::new(shift)).generate(),
+                );
+                opcode_stream.push_opcode(Ret::new().generate());
+            });
+
+            let val = unsafe { invoke!(block, extern "C" fn(u64) -> u64, 0xDEADC0DEDEADC0DE) };
+            assert_eq!(val, 0xDEADC0DEDEADC0DE << shift);
+        }
+    }
+
+    #[test]
+    fn test_lsr() {
+        let mut block = Block::allocate(page::size()).unwrap();
+
+        for shift in 0..63 {
+            block.populate(|opcode_stream| {
+                opcode_stream.push_opcode(
+                    Lsr::new(Register::X0, Register::X0, Immediate::new(shift)).generate(),
+                );
+                opcode_stream.push_opcode(Ret::new().generate());
+            });
+
+            let val = unsafe { invoke!(block, extern "C" fn(u64) -> u64, 0xDEADC0DEDEADC0DE) };
+            assert_eq!(val, 0xDEADC0DEDEADC0DE >> shift);
+        }
+    }
+
+    #[test]
+    fn test_asr() {
+        let mut block = Block::allocate(page::size()).unwrap();
+
+        for shift in 0..63 {
+            block.populate(|opcode_stream| {
+                opcode_stream.push_opcode(
+                    Asr::new(Register::X0, Register::X0, Immediate::new(shift)).generate(),
+                );
+                opcode_stream.push_opcode(Ret::new().generate());
+            });
+
+            let val = unsafe { invoke!(block, extern "C" fn(u64) -> u64, 0xDEADC0DEDEADC0DE) };
+
+            let expected_val = if shift == 0 {
+                0xDEADC0DEDEADC0DE_u64
+            } else {
+                (0xDEADC0DEDEADC0DE_u64 >> shift) | (0xFFFFFFFFFFFFFFFF_u64 << (64_u64 - shift))
+            };
+            assert_eq!(val, expected_val);
+        }
     }
 }
