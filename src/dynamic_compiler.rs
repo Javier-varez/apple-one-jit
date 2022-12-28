@@ -658,6 +658,31 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
         );
     }
 
+    fn emit_sbc_instruction(&mut self, instruction: &mos6502::Instruction) {
+        self.emit_deref_if_needed(instruction, DECODED_OP_REGISTER);
+        self.opcode_stream
+            .push_opcode(arm_asm::Sxtb::new(ACCUMULATOR_REGISTER, ACCUMULATOR_REGISTER).generate());
+        self.opcode_stream
+            .push_opcode(arm_asm::Sxtb::new(DECODED_OP_REGISTER, DECODED_OP_REGISTER).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::Sbc::new(
+                ACCUMULATOR_REGISTER,
+                ACCUMULATOR_REGISTER,
+                DECODED_OP_REGISTER,
+            )
+            .update_flags()
+            .with_op_size(arm_asm::OpSize::Size32)
+            .generate(),
+        );
+        self.opcode_stream
+            .push_opcode(arm_asm::SetF8::new(ACCUMULATOR_REGISTER).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::And::new(ACCUMULATOR_REGISTER, ACCUMULATOR_REGISTER)
+                .with_immediate(arm_asm::Immediate::new(0xFF))
+                .generate(),
+        );
+    }
+
     fn emit_and_instruction(&mut self, instruction: &mos6502::Instruction) {
         self.emit_deref_if_needed(instruction, DECODED_OP_REGISTER);
 
@@ -1200,6 +1225,9 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             }
             mos6502::instructions::BaseInstruction::Adc => {
                 self.emit_adc_instruction(instruction);
+            }
+            mos6502::instructions::BaseInstruction::Sbc => {
+                self.emit_sbc_instruction(instruction);
             }
             mos6502::instructions::BaseInstruction::And => {
                 self.emit_and_instruction(instruction);
