@@ -1,0 +1,3 @@
+[test]
+entry_state = { accumulator = 0x12, x = 0, y = 0, sp = 0, pc = 0x800, flags = ["C"], memory = { 0 = [ 0x06 ] }  }
+exit_state = { accumulator = 0x12, x = 0, y = 0, sp = 0, pc = 0x801, flags = ["C"], memory = { 0 = [ 0x06 ] }  }

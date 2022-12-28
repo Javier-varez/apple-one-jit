@@ -1202,6 +1202,11 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
         );
     }
 
+    fn emit_nop_instruction(&mut self) {
+        self.opcode_stream
+            .push_opcode(arm_asm::Nop::new().generate());
+    }
+
     /// Handles the actual instruction, assuming that the decoded operand is available in DECODED_OP_REGISTER
     fn emit_instruction(&mut self, instruction: &mos6502::Instruction) {
         match instruction.opcode.base_instruction() {
@@ -1300,6 +1305,9 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             }
             mos6502::instructions::BaseInstruction::Iny => {
                 self.emit_inc_index_instruction(Y_REGISTER);
+            }
+            mos6502::instructions::BaseInstruction::Nop => {
+                self.emit_nop_instruction();
             }
             mos6502::instructions::BaseInstruction::Rts => {
                 // TODO(javier-varez): Pop pc from stack and set it before actually returning
