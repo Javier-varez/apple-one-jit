@@ -1,0 +1,11 @@
+[test-sets-neg-flag]
+entry_state = { accumulator = 0x00, y = 0x81, x = 0, sp = 0xff, pc = 0x800, flags = ["C", "V"] }
+exit_state = { accumulator = 0x00, y = 0x80, x = 0, sp = 0xff, pc = 0x801, flags = ["N", "C", "V"] }
+
+[test-sets-zero-flag]
+entry_state = { accumulator = 0x00, y = 0x01, x = 0, sp = 0xff, pc = 0x800, flags = ["C", "V"] }
+exit_state = { accumulator = 0x00, y = 0x00, x = 0, sp = 0xff, pc = 0x801, flags = ["Z", "C", "V"] }
+
+[test-wraparound]
+entry_state = { accumulator = 0x00, y = 0x00, x = 0, sp = 0xff, pc = 0x800, flags = ["C", "V"] }
+exit_state = { accumulator = 0x00, y = 0xff, x = 0, sp = 0xff, pc = 0x801, flags = ["N", "C", "V"] }

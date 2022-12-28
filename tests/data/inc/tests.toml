@@ -1,0 +1,7 @@
+[test-sets-neg-flag]
+entry_state = { accumulator = 0x00, x = 0, y = 0, sp = 0xff, pc = 0x800, flags = ["C", "V"], memory = { 0xf2 = [0x7f] } }
+exit_state = { accumulator = 0x00, x = 0, y = 0, sp = 0xff, pc = 0x802, flags = ["N", "C", "V"], memory = { 0xf2 = [0x80] } }
+
+[test-sets-zero-flag]
+entry_state = { accumulator = 0x00, x = 0, y = 0, sp = 0xff, pc = 0x800, flags = ["C", "V"], memory = { 0xf2 = [0xff] } }
+exit_state = { accumulator = 0x00, x = 0, y = 0, sp = 0xff, pc = 0x802, flags = ["Z", "C", "V"], memory = { 0xf2 = [0x0] } }

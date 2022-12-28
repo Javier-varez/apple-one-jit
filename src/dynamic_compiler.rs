@@ -232,8 +232,10 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
         self.opcode_stream
             .push_opcode(arm_asm::Mov::new(CALL_ARG1, addr_reg).generate());
         self.emit_function_call(self.trampolines.read_8_bit.clone());
-        self.opcode_stream
-            .push_opcode(arm_asm::Mov::new(target_reg, CALL_RESULT0).generate());
+        if target_reg != CALL_RESULT0 {
+            self.opcode_stream
+                .push_opcode(arm_asm::Mov::new(target_reg, CALL_RESULT0).generate());
+        }
     }
 
     fn emit_8_byte_load_immediate_addr(&mut self, target_reg: arm_asm::Register, address: u16) {
@@ -1093,6 +1095,88 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
         self.emit_restore_flags(saved_flags);
     }
 
+    fn emit_dec_instruction(&mut self) {
+        self.emit_8_byte_load(CALL_RESULT0, DECODED_OP_REGISTER);
+
+        self.opcode_stream.push_opcode(
+            arm_asm::Sub::new(CALL_RESULT0, CALL_RESULT0)
+                .with_immediate(Immediate::new(1))
+                .generate(),
+        );
+
+        let saved_flags = &[mos6502::Flags::C, mos6502::Flags::V];
+        self.emit_save_flags(saved_flags);
+        self.opcode_stream
+            .push_opcode(arm_asm::SetF8::new(CALL_RESULT0).generate());
+        self.emit_restore_flags(saved_flags);
+
+        self.opcode_stream
+            .push_opcode(arm_asm::Mov::new(SCRATCH_REGISTER, CALL_RESULT0).generate());
+        self.emit_8_byte_store(DECODED_OP_REGISTER, SCRATCH_REGISTER);
+    }
+
+    fn emit_inc_instruction(&mut self) {
+        self.emit_8_byte_load(CALL_RESULT0, DECODED_OP_REGISTER);
+
+        self.opcode_stream.push_opcode(
+            arm_asm::Add::new(CALL_RESULT0, CALL_RESULT0)
+                .with_immediate(Immediate::new(1))
+                .generate(),
+        );
+
+        let saved_flags = &[mos6502::Flags::C, mos6502::Flags::V];
+        self.emit_save_flags(saved_flags);
+        self.opcode_stream
+            .push_opcode(arm_asm::SetF8::new(CALL_RESULT0).generate());
+        self.emit_restore_flags(saved_flags);
+
+        self.opcode_stream
+            .push_opcode(arm_asm::Mov::new(SCRATCH_REGISTER, CALL_RESULT0).generate());
+        self.emit_8_byte_store(DECODED_OP_REGISTER, SCRATCH_REGISTER);
+    }
+
+    fn emit_dec_index_instruction(&mut self, register: arm_asm::Register) {
+        self.opcode_stream.push_opcode(
+            arm_asm::Sub::new(register, register)
+                .with_immediate(Immediate::new(1))
+                .generate(),
+        );
+
+        let saved_flags = &[mos6502::Flags::C, mos6502::Flags::V];
+        self.emit_save_flags(saved_flags);
+        self.opcode_stream
+            .push_opcode(arm_asm::SetF8::new(register).generate());
+        self.emit_restore_flags(saved_flags);
+
+        // Make sure it is still 8-bit
+        self.opcode_stream.push_opcode(
+            arm_asm::And::new(register, register)
+                .with_immediate(Immediate::new(0xff))
+                .generate(),
+        );
+    }
+
+    fn emit_inc_index_instruction(&mut self, register: arm_asm::Register) {
+        self.opcode_stream.push_opcode(
+            arm_asm::Add::new(register, register)
+                .with_immediate(Immediate::new(1))
+                .generate(),
+        );
+
+        let saved_flags = &[mos6502::Flags::C, mos6502::Flags::V];
+        self.emit_save_flags(saved_flags);
+        self.opcode_stream
+            .push_opcode(arm_asm::SetF8::new(register).generate());
+        self.emit_restore_flags(saved_flags);
+
+        // Make sure it is still 8-bit
+        self.opcode_stream.push_opcode(
+            arm_asm::And::new(register, register)
+                .with_immediate(Immediate::new(0xff))
+                .generate(),
+        );
+    }
+
     /// Handles the actual instruction, assuming that the decoded operand is available in DECODED_OP_REGISTER
     fn emit_instruction(&mut self, instruction: &mos6502::Instruction) {
         match instruction.opcode.base_instruction() {
@@ -1170,6 +1254,24 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             }
             mos6502::instructions::BaseInstruction::Plp => {
                 self.emit_plp_instruction();
+            }
+            mos6502::instructions::BaseInstruction::Dec => {
+                self.emit_dec_instruction();
+            }
+            mos6502::instructions::BaseInstruction::Inc => {
+                self.emit_inc_instruction();
+            }
+            mos6502::instructions::BaseInstruction::Dex => {
+                self.emit_dec_index_instruction(X_REGISTER);
+            }
+            mos6502::instructions::BaseInstruction::Inx => {
+                self.emit_inc_index_instruction(X_REGISTER);
+            }
+            mos6502::instructions::BaseInstruction::Dey => {
+                self.emit_dec_index_instruction(Y_REGISTER);
+            }
+            mos6502::instructions::BaseInstruction::Iny => {
+                self.emit_inc_index_instruction(Y_REGISTER);
             }
             mos6502::instructions::BaseInstruction::Rts => {
                 // TODO(javier-varez): Pop pc from stack and set it before actually returning

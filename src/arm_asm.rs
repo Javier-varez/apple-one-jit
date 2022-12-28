@@ -47,7 +47,7 @@ impl<const BITS: u8> SignedImmediate<BITS> {
 }
 
 /// Aarch64 Machine registers
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Register {
     X0 = 0,
     X1 = 1,
