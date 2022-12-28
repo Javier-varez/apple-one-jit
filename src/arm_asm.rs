@@ -1524,3 +1524,15 @@ impl Lsl {
             .generate()
     }
 }
+
+pub struct Nop {}
+
+impl Nop {
+    pub fn new() -> Self {
+        Self {}
+    }
+
+    pub fn generate(self) -> OpCode {
+        OpCode(0xD503201F)
+    }
+}

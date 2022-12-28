@@ -179,8 +179,8 @@ mod test {
     use super::*;
     use crate::arm_asm::{
         Adc, Add, And, Asr, Branch, Condition, Immediate, LdrLit, Ldrd, Lsl, Lsr, MemoryAccessMode,
-        Mov, MovShift, Movk, Movn, Movz, Mrs, Msr, OpSize, Or, RegShift, Register, Ret, Sbc, SetF8,
-        SignedImmediate, Strd, Sub, Sxtb, Xor, NZCV,
+        Mov, MovShift, Movk, Movn, Movz, Mrs, Msr, Nop, OpSize, Or, RegShift, Register, Ret, Sbc,
+        SetF8, SignedImmediate, Strd, Sub, Sxtb, Xor, NZCV,
     };
     use region::page;
 
@@ -1205,5 +1205,17 @@ mod test {
             };
             assert_eq!(val, expected_val);
         }
+    }
+
+    #[test]
+    fn test_nop() {
+        let mut block = Block::allocate(page::size()).unwrap();
+
+        block.populate(|opcode_stream| {
+            opcode_stream.push_opcode(Nop::new().generate());
+            opcode_stream.push_opcode(Ret::new().generate());
+        });
+
+        unsafe { invoke!(block, extern "C" fn()) };
     }
 }
