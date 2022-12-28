@@ -525,6 +525,15 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
         })
     }
 
+    const fn flag_offset(flag: mos6502::Flags) -> usize {
+        match flag {
+            mos6502::Flags::N => 31,
+            mos6502::Flags::Z => 30,
+            mos6502::Flags::C => 29,
+            mos6502::Flags::V => 28,
+        }
+    }
+
     fn inverted_flags_mask(flags: &[mos6502::Flags]) -> u64 {
         Self::flags_mask(flags) ^ 0xFFFF_FFFF_FFFF_FFFF
     }
@@ -864,7 +873,7 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
                 .generate(),
         );
 
-        let branch_to_set_nzvc = self.opcode_stream.add_marker();
+        let branch_to_set_nzcv = self.opcode_stream.add_marker();
 
         self.opcode_stream.push_opcode(
             arm_asm::Or::new(SCRATCH_REGISTER, SCRATCH_REGISTER)
@@ -872,16 +881,16 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
                 .generate(),
         );
 
-        let set_nzvc_marker = self
+        let set_nzcv_marker = self
             .opcode_stream
             .push_opcode(arm_asm::Msr::new(arm_asm::NZCV, SCRATCH_REGISTER).generate());
 
         self.opcode_stream.patch_opcode(
-            &branch_to_set_nzvc,
+            &branch_to_set_nzcv,
             arm_asm::Branch::new()
                 .with_immediate(arm_asm::SignedImmediate::new(
                     self.opcode_stream
-                        .relative_distance(&set_nzvc_marker, &branch_to_set_nzvc),
+                        .relative_distance(&set_nzcv_marker, &branch_to_set_nzcv),
                 ))
                 .iff(arm_asm::Condition::Ne)
                 .generate(),
@@ -912,6 +921,143 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
                 .with_immediate(Immediate::new(0xff))
                 .generate(),
         );
+    }
+
+    const SR_N_OFFSET: usize = 7;
+    const SR_V_OFFSET: usize = 6;
+    const SR_B_OFFSET: usize = 4;
+    const SR_D_OFFSET: usize = 3;
+    const SR_I_OFFSET: usize = 2;
+    const SR_Z_OFFSET: usize = 1;
+    const SR_C_OFFSET: usize = 0;
+
+    const FLAG_TRANSLATIONS: [(usize, usize); 4] = [
+        (Self::flag_offset(mos6502::Flags::N), Self::SR_N_OFFSET),
+        (Self::flag_offset(mos6502::Flags::V), Self::SR_V_OFFSET),
+        (Self::flag_offset(mos6502::Flags::Z), Self::SR_Z_OFFSET),
+        (Self::flag_offset(mos6502::Flags::C), Self::SR_C_OFFSET),
+    ];
+
+    fn emit_build_status_register(&mut self, dest_register: arm_asm::Register) {
+        self.opcode_stream
+            .push_opcode(arm_asm::Mrs::new(SCRATCH_REGISTER, arm_asm::NZCV).generate());
+
+        // Set initial value
+        self.opcode_stream.push_opcode(
+            arm_asm::Movz::new(dest_register)
+                .with_immediate(Immediate::new(
+                    // FIXME(javier-varez): Interrupt flag should not be hardcoded to 0
+                    (1 << Self::SR_B_OFFSET) | (0 << Self::SR_D_OFFSET) | (0 << Self::SR_I_OFFSET),
+                ))
+                .generate(),
+        );
+
+        for (source_flag, dest_flag) in Self::FLAG_TRANSLATIONS {
+            self.opcode_stream.push_opcode(
+                arm_asm::Lsr::new(
+                    SCRATCH_REGISTER_2,
+                    SCRATCH_REGISTER,
+                    Immediate::new((source_flag - dest_flag) as u64),
+                )
+                .generate(),
+            );
+
+            self.opcode_stream.push_opcode(
+                arm_asm::And::new(SCRATCH_REGISTER_2, SCRATCH_REGISTER_2)
+                    .with_immediate(Immediate::new(1 << dest_flag))
+                    .generate(),
+            );
+
+            self.opcode_stream.push_opcode(
+                arm_asm::Or::new(dest_register, dest_register)
+                    .with_shifted_reg(SCRATCH_REGISTER_2)
+                    .generate(),
+            );
+        }
+    }
+
+    fn emit_restore_status_reg(&mut self, src_reg: arm_asm::Register) {
+        self.opcode_stream.push_opcode(
+            arm_asm::Movz::new(SCRATCH_REGISTER)
+                .with_immediate(Immediate::new(0))
+                .generate(),
+        );
+
+        for (dest_flag, source_flag) in Self::FLAG_TRANSLATIONS {
+            self.opcode_stream.push_opcode(
+                arm_asm::And::new(SCRATCH_REGISTER_2, src_reg)
+                    .with_immediate(Immediate::new(1 << source_flag))
+                    .generate(),
+            );
+
+            self.opcode_stream.push_opcode(
+                arm_asm::Lsl::new(
+                    SCRATCH_REGISTER_2,
+                    SCRATCH_REGISTER_2,
+                    Immediate::new((dest_flag - source_flag) as u64),
+                )
+                .generate(),
+            );
+
+            self.opcode_stream.push_opcode(
+                arm_asm::Or::new(SCRATCH_REGISTER, SCRATCH_REGISTER)
+                    .with_shifted_reg(SCRATCH_REGISTER_2)
+                    .generate(),
+            );
+        }
+
+        self.opcode_stream
+            .push_opcode(arm_asm::Msr::new(arm_asm::NZCV, SCRATCH_REGISTER).generate());
+    }
+
+    fn emit_php_instruction(&mut self) {
+        // Call write_8_bit function
+        self.opcode_stream
+            .push_opcode(arm_asm::Mov::new(CALL_ARG0, MEMORY_INTERFACE_REG).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::Or::new(CALL_ARG1, SP_REGISTER)
+                .with_immediate(Immediate::new(0x100))
+                .generate(),
+        );
+        self.emit_build_status_register(CALL_ARG2);
+        self.emit_function_call(self.trampolines.write_8_bit.clone());
+
+        // Decrement sp with wraparound
+        self.opcode_stream.push_opcode(
+            arm_asm::Sub::new(SP_REGISTER, SP_REGISTER)
+                .with_immediate(Immediate::new(1))
+                .generate(),
+        );
+        self.opcode_stream.push_opcode(
+            arm_asm::And::new(SP_REGISTER, SP_REGISTER)
+                .with_immediate(Immediate::new(0xff))
+                .generate(),
+        );
+    }
+
+    fn emit_plp_instruction(&mut self) {
+        // Increment sp with wraparound
+        self.opcode_stream.push_opcode(
+            arm_asm::Add::new(SP_REGISTER, SP_REGISTER)
+                .with_immediate(Immediate::new(1))
+                .generate(),
+        );
+        self.opcode_stream.push_opcode(
+            arm_asm::And::new(SP_REGISTER, SP_REGISTER)
+                .with_immediate(Immediate::new(0xff))
+                .generate(),
+        );
+
+        // Call read_8_bit function
+        self.opcode_stream
+            .push_opcode(arm_asm::Mov::new(CALL_ARG0, MEMORY_INTERFACE_REG).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::Or::new(CALL_ARG1, SP_REGISTER)
+                .with_immediate(Immediate::new(0x100))
+                .generate(),
+        );
+        self.emit_function_call(self.trampolines.read_8_bit.clone());
+        self.emit_restore_status_reg(CALL_RESULT0);
     }
 
     fn emit_pla_instruction(&mut self) {
@@ -1018,6 +1164,12 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             }
             mos6502::instructions::BaseInstruction::Pla => {
                 self.emit_pla_instruction();
+            }
+            mos6502::instructions::BaseInstruction::Php => {
+                self.emit_php_instruction();
+            }
+            mos6502::instructions::BaseInstruction::Plp => {
+                self.emit_plp_instruction();
             }
             mos6502::instructions::BaseInstruction::Rts => {
                 // TODO(javier-varez): Pop pc from stack and set it before actually returning

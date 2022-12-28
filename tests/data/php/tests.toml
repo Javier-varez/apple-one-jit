@@ -1,0 +1,19 @@
+[push-status-reg-all-flags]
+entry_state = { accumulator = 0x00, x = 0, y = 0, sp = 0xff, pc = 0x800, flags = ["N", "C", "V", "Z"], memory = { 0x1ff = [0] } }
+exit_state = { accumulator = 0x00, x = 0, y = 0, sp = 0xfe, pc = 0x801, flags = ["N", "C", "V", "Z"], memory = { 0x1ff = [0xD3] } }
+
+[push-status-reg-neg-flag]
+entry_state = { accumulator = 0x00, x = 0, y = 0, sp = 0xff, pc = 0x800, flags = ["N"], memory = { 0x1ff = [0] } }
+exit_state = { accumulator = 0x00, x = 0, y = 0, sp = 0xfe, pc = 0x801, flags = ["N"], memory = { 0x1ff = [0x90] } }
+
+[push-status-reg-overflow-flag]
+entry_state = { accumulator = 0x00, x = 0, y = 0, sp = 0xff, pc = 0x800, flags = ["V"], memory = { 0x1ff = [0] } }
+exit_state = { accumulator = 0x00, x = 0, y = 0, sp = 0xfe, pc = 0x801, flags = ["V"], memory = { 0x1ff = [0x50] } }
+
+[push-status-reg-zero-flag]
+entry_state = { accumulator = 0x00, x = 0, y = 0, sp = 0xff, pc = 0x800, flags = ["Z"], memory = { 0x1ff = [0] } }
+exit_state = { accumulator = 0x00, x = 0, y = 0, sp = 0xfe, pc = 0x801, flags = ["Z"], memory = { 0x1ff = [0x12] } }
+
+[push-status-reg-carry-flag]
+entry_state = { accumulator = 0x00, x = 0, y = 0, sp = 0xff, pc = 0x800, flags = ["C"], memory = { 0x1ff = [0] } }
+exit_state = { accumulator = 0x00, x = 0, y = 0, sp = 0xfe, pc = 0x801, flags = ["C"], memory = { 0x1ff = [0x11] } }
