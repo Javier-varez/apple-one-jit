@@ -828,6 +828,20 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             .push_opcode(arm_asm::Msr::new(arm_asm::NZCV, SCRATCH_REGISTER).generate());
     }
 
+    fn emit_sec_instruction(&mut self) {
+        self.opcode_stream
+            .push_opcode(arm_asm::Mrs::new(SCRATCH_REGISTER, arm_asm::NZCV).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::Or::new(SCRATCH_REGISTER, SCRATCH_REGISTER)
+                .with_immediate(arm_asm::Immediate::new(Self::flags_mask(&[
+                    mos6502::Flags::C,
+                ])))
+                .generate(),
+        );
+        self.opcode_stream
+            .push_opcode(arm_asm::Msr::new(arm_asm::NZCV, SCRATCH_REGISTER).generate());
+    }
+
     fn emit_bit_instruction(&mut self) {
         self.emit_8_byte_load(DECODED_OP_REGISTER, DECODED_OP_REGISTER);
 
@@ -1569,11 +1583,14 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             mos6502::instructions::BaseInstruction::Cld => {
                 // Decimal mode is not supported, therefore there's nothing to do here
             }
-            mos6502::instructions::BaseInstruction::Sed => {
-                unimplemented!("Decimal mode not supported");
-            }
             mos6502::instructions::BaseInstruction::Clv => {
                 self.emit_clv_instruction();
+            }
+            mos6502::instructions::BaseInstruction::Sec => {
+                self.emit_sec_instruction();
+            }
+            mos6502::instructions::BaseInstruction::Sed => {
+                unimplemented!("Decimal mode not supported");
             }
             mos6502::instructions::BaseInstruction::Bit => {
                 self.emit_bit_instruction();
@@ -1623,13 +1640,35 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             mos6502::instructions::BaseInstruction::Ror => {
                 self.emit_ror_instruction(instruction);
             }
+
+            // Comparison instructions
+            mos6502::instructions::BaseInstruction::Cmp => todo!(),
+            mos6502::instructions::BaseInstruction::Cpx => todo!(),
+            mos6502::instructions::BaseInstruction::Cpy => todo!(),
+
+            // Interrupt functionality
+            mos6502::instructions::BaseInstruction::Brk => todo!(),
+            mos6502::instructions::BaseInstruction::Rti => todo!(),
+            mos6502::instructions::BaseInstruction::Cli => todo!(),
+            mos6502::instructions::BaseInstruction::Sei => todo!(),
+
+            // Conditional branching
+            mos6502::instructions::BaseInstruction::Bcs => todo!(),
+            mos6502::instructions::BaseInstruction::Bcc => todo!(),
+            mos6502::instructions::BaseInstruction::Beq => todo!(),
+            mos6502::instructions::BaseInstruction::Bne => todo!(),
+            mos6502::instructions::BaseInstruction::Bmi => todo!(),
+            mos6502::instructions::BaseInstruction::Bpl => todo!(),
+            mos6502::instructions::BaseInstruction::Bvs => todo!(),
+            mos6502::instructions::BaseInstruction::Bvc => todo!(),
+
+            // Unconditional branching
+            mos6502::instructions::BaseInstruction::Jmp => todo!(),
+            mos6502::instructions::BaseInstruction::Jsr => todo!(),
             mos6502::instructions::BaseInstruction::Rts => {
                 // TODO(javier-varez): Pop pc from stack and set it before actually returning
                 self.opcode_stream
                     .push_opcode(arm_asm::Ret::new().generate());
-            }
-            _ => {
-                unimplemented!();
             }
         }
     }
