@@ -11,18 +11,19 @@ jump_to_emulator:
     // Restore state from r1
     // X24 = memory interface ptr
     mov x24, x2
+
     // x19 = acc
-    ldr x19, [x1, 0]
     // x20 = x reg
-    ldr x20, [x1, 8]
+    ldp x19, x20, [x1, 0]
+
     // x21 = y reg
-    ldr x21, [x1, 16]
     // x22 = sp reg
-    ldr x22, [x1, 24]
+    ldp x21, x22, [x1, 16]
+
     // Restore PC
-    ldr x23, [x1, 32]
     // Restore Flags into nzcv
-    ldr x9, [x1, 40]
+    ldp x23, x9, [x1, 32]
+
     msr nzcv, x9
 
     // Jump to target code
@@ -33,17 +34,14 @@ jump_to_emulator:
     // Restore Flags into nzcv
     mrs x9, nzcv
     // acc = x19
-    str x19, [x1, 0]
     // x reg = x1
-    str x20, [x1, 8]
+    stp x19, x20, [x1, 0]
     // y reg = x2
-    str x21, [x1, 16]
     // sp reg = x3
-    str x22, [x1, 24]
+    stp x21, x22, [x1, 16]
     // pc reg = x4
-    str x23, [x1, 32]
     // flags = nzcv
-    str x9, [x1, 40]
+    stp x23, x9, [x1, 32]
 
     ldp x27, x28, [sp, #0x10]
     ldp x25, x26, [sp, #0x20]
