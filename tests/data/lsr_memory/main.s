@@ -2,4 +2,4 @@
 
 main:
    lsr $ff
-   rts
+   .byte $02

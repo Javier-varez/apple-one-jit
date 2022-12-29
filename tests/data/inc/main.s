@@ -2,4 +2,4 @@
 
 main:
    inc $f2
-   rts
+   .byte $02

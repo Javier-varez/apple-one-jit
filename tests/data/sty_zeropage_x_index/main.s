@@ -2,4 +2,4 @@
 
 main:
     sty $34,x
-    rts
+    .byte $02

@@ -2,4 +2,4 @@
 
 main:
     stx $1234
-    rts
+    .byte $02

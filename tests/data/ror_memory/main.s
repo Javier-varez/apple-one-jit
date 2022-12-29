@@ -2,4 +2,4 @@
 
 main:
    ror $ff
-   rts
+   .byte $02

@@ -2,4 +2,4 @@
 
 main:
    plp
-   rts
+   .byte $02

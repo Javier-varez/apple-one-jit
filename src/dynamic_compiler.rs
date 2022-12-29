@@ -2,20 +2,17 @@ use std::marker::PhantomData;
 
 use crate::arm_asm::{self, Immediate};
 use crate::block::{LocationRange, Marker, OpCodeStream};
-use crate::dynamic_compiler::Error::Unknown6502OpCode;
 use crate::memory::{Address, MemoryInterface};
 use crate::mos6502;
 
 #[derive(Debug)]
 pub enum Error {
-    Unknown6502OpCode,
+    DecodingError(mos6502::Error),
 }
 
 impl From<mos6502::Error> for Error {
     fn from(mos_error: mos6502::Error) -> Self {
-        match mos_error {
-            mos6502::Error::UnknownOpCode => Unknown6502OpCode,
-        }
+        Error::DecodingError(mos_error)
     }
 }
 
@@ -49,7 +46,7 @@ const CALL_RESULT0: arm_asm::Register = arm_asm::Register::X0;
 const TEMP_REG0: arm_asm::Register = arm_asm::Register::X3;
 
 // This is an intra-procedure register, used for the trampoline.
-const TRAMPOLIN_TARGET: arm_asm::Register = arm_asm::Register::X17;
+const TRAMPOLINE_TARGET: arm_asm::Register = arm_asm::Register::X17;
 
 type Trampoline = Marker;
 
@@ -77,10 +74,24 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
         let mut address = start_address;
         let mut should_continue = true;
         while should_continue {
-            if let Some(instr) = self
+            let instr_or_error = self
                 .decoder
-                .feed(self.memory_interface.read_8_bits(address))?
-            {
+                .feed(self.memory_interface.read_8_bits(address));
+
+            const TEST_END_OPCODE: u8 = 0x02;
+            // Jam opcode 0x1a is treated differently so that tests can stop without returning or
+            // jumping
+            if matches!(
+                instr_or_error,
+                Err(mos6502::Error::JamOpCode(TEST_END_OPCODE))
+            ) {
+                // Just in case the instruction decoder did not find any isntr
+                self.opcode_stream
+                    .push_opcode(arm_asm::Ret::new().generate());
+                return Ok(LocationRange::new(start_address, address));
+            }
+
+            if let Some(instr) = instr_or_error? {
                 println!("Decoded instr {:?}", instr);
                 self.emit_instruction_address_mode(&instr);
                 self.emit_instruction(&instr);
@@ -214,7 +225,7 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
         self.opcode_stream.patch_opcode(
             &current_location,
             arm_asm::LdrLit::new(
-                TRAMPOLIN_TARGET,
+                TRAMPOLINE_TARGET,
                 arm_asm::SignedImmediate::new(target_relative_distance),
             )
             .generate(),
@@ -222,7 +233,7 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
         // Jump to it
         self.opcode_stream.push_opcode(
             arm_asm::Branch::new()
-                .with_register(TRAMPOLIN_TARGET)
+                .with_register(TRAMPOLINE_TARGET)
                 .link()
                 .generate(),
         );
@@ -1665,11 +1676,7 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             // Unconditional branching
             mos6502::instructions::BaseInstruction::Jmp => todo!(),
             mos6502::instructions::BaseInstruction::Jsr => todo!(),
-            mos6502::instructions::BaseInstruction::Rts => {
-                // TODO(javier-varez): Pop pc from stack and set it before actually returning
-                self.opcode_stream
-                    .push_opcode(arm_asm::Ret::new().generate());
-            }
+            mos6502::instructions::BaseInstruction::Rts => todo!(),
         }
     }
 }

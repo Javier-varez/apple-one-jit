@@ -2,4 +2,4 @@
 
 main:
     stx $34
-    rts
+    .byte $02

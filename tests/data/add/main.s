@@ -3,4 +3,4 @@
 main:
    lda #$1
    adc #$7f
-   rts
+   .byte $02

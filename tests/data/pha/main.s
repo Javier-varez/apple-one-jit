@@ -2,4 +2,4 @@
 
 main:
    pha
-   rts
+   .byte $02

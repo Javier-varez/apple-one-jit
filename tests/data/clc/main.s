@@ -2,4 +2,4 @@
 
 main:
    clc
-   rts
+   .byte $02

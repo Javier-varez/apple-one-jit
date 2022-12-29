@@ -2,4 +2,4 @@
 
 main:
    clv
-   rts
+   .byte $02

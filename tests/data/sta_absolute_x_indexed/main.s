@@ -2,4 +2,4 @@
 
 main:
     sta $1234,x
-    rts
+    .byte $02

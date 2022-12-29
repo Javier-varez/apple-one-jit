@@ -2,4 +2,4 @@
 
 main:
    and $0f
-   rts
+   .byte $02

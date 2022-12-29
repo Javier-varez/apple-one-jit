@@ -2,4 +2,4 @@
 
 main:
    tsx
-   rts
+   .byte $02

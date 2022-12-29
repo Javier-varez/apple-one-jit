@@ -2,4 +2,4 @@
 
 main:
    rol $ff
-   rts
+   .byte $02

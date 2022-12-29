@@ -2,4 +2,4 @@
 
 main:
    lsr a
-   rts
+   .byte $02

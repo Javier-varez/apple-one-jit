@@ -2,4 +2,4 @@
 
 main:
    tya
-   rts
+   .byte $02

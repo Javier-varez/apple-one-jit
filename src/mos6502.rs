@@ -4,7 +4,8 @@ pub mod opcode;
 
 #[derive(Debug)]
 pub enum Error {
-    UnknownOpCode,
+    JamOpCode(u8),
+    UnknownOpCode(u8),
 }
 
 #[derive(Debug)]
@@ -39,6 +40,7 @@ impl InstrDecoder {
     }
 
     pub fn feed(&mut self, byte: u8) -> Result<Option<Instruction>, Error> {
+        const JAM_OP_CODE: u8 = 0x02;
         match self.state.clone() {
             State::DecodeOpCode => {
                 if let Some(opcode) = opcode::translate(byte) {
@@ -52,8 +54,10 @@ impl InstrDecoder {
                         self.state = State::DecodeOperand(opcode, None);
                         Ok(None)
                     }
+                } else if byte == JAM_OP_CODE {
+                    Err(Error::JamOpCode(byte))
                 } else {
-                    Err(Error::UnknownOpCode)
+                    Err(Error::UnknownOpCode(byte))
                 }
             }
             State::DecodeOperand(opcode, Some(first_byte)) => {

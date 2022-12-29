@@ -2,4 +2,4 @@
 
 main:
    tax
-   rts
+   .byte $02

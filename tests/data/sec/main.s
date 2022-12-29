@@ -2,4 +2,4 @@
 
 main:
    sec
-   rts
+   .byte $02

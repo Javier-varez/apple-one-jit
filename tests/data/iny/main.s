@@ -2,4 +2,4 @@
 
 main:
    iny
-   rts
+   .byte $02

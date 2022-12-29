@@ -2,4 +2,4 @@
 
 main:
    txs
-   rts
+   .byte $02

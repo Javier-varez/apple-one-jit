@@ -2,4 +2,4 @@
 
 main:
    rol a
-   rts
+   .byte $02

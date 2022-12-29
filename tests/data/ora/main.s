@@ -2,4 +2,4 @@
 
 main:
    ora $f
-   rts
+   .byte $02

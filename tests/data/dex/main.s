@@ -2,4 +2,4 @@
 
 main:
    dex
-   rts
+   .byte $02

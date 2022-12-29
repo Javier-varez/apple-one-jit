@@ -2,4 +2,4 @@
 
 main:
    asl a
-   rts
+   .byte $02

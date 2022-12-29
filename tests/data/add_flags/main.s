@@ -2,4 +2,4 @@
 
 main:
    adc 0
-   rts
+   .byte $02

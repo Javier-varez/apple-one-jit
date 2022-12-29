@@ -2,4 +2,4 @@
 
 main:
    eor $f
-   rts
+   .byte $02

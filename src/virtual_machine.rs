@@ -126,7 +126,7 @@ mod test {
 
     #[test]
     fn add_test() {
-        let mut memory = Memory::from(&[0xA9, 0x0A, 0x69, 0x14, 0x60]);
+        let mut memory = Memory::from(&[0xA9, 0x0A, 0x69, 0x14, 0x02]);
         let mut vm = VirtualMachine::new(&mut memory);
         vm.run().unwrap();
         assert_eq!(vm.state.a, 30);

@@ -2,4 +2,4 @@
 
 main:
    ror a
-   rts
+   .byte $02

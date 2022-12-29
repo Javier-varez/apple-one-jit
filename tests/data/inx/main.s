@@ -2,4 +2,4 @@
 
 main:
    inx
-   rts
+   .byte $02

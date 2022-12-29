@@ -2,4 +2,4 @@
 
 main:
    bit $10
-   rts
+   .byte $02

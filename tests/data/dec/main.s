@@ -2,4 +2,4 @@
 
 main:
    dec $f2
-   rts
+   .byte $02

@@ -2,4 +2,4 @@
 
 main:
    asl $ff
-   rts
+   .byte $02

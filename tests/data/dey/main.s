@@ -2,4 +2,4 @@
 
 main:
    dey
-   rts
+   .byte $02

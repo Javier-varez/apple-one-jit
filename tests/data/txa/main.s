@@ -2,4 +2,4 @@
 
 main:
    txa
-   rts
+   .byte $02

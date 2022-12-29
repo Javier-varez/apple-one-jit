@@ -2,4 +2,4 @@
 
 main:
    tay
-   rts
+   .byte $02

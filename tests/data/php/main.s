@@ -2,4 +2,4 @@
 
 main:
    php
-   rts
+   .byte $02

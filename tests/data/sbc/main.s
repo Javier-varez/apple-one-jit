@@ -2,4 +2,4 @@
 
 main:
    sbc $00
-   rts
+   .byte $02

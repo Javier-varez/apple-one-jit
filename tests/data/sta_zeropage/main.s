@@ -2,4 +2,4 @@
 
 main:
     sta $34
-    rts
+    .byte $02

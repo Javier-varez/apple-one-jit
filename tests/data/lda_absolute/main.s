@@ -3,4 +3,4 @@
 main:
     // Load memory addr 0
     lda $1234
-    rts
+    .byte $02

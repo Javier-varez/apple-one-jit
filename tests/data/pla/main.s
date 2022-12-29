@@ -2,4 +2,4 @@
 
 main:
    pla
-   rts
+   .byte $02
