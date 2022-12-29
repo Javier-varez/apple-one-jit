@@ -1,0 +1,15 @@
+[test]
+entry_state = { accumulator = 0, x = 0x12, y = 0, sp = 0, pc = 0x800, flags = ["C"], memory = { 0 = [ 0x06 ] }  }
+exit_state = { accumulator = 0, x = 0x12, y = 0, sp = 0, pc = 0x802, flags = ["C"], memory = { 0 = [ 0x06 ] } }
+
+[with-borrow]
+entry_state = { accumulator = 0, x = 0x12, y = 0, sp = 0, pc = 0x800, flags = [], memory = { 0 = [ 0x06 ] }  }
+exit_state = { accumulator = 0, x = 0x12, y = 0, sp = 0, pc = 0x802, flags = ["C"], memory = { 0 = [ 0x06 ] } }
+
+[trigger-borrow]
+entry_state = { accumulator = 0, x = 0x12, y = 0, sp = 0, pc = 0x800, flags = ["C"], memory = { 0 = [ 0x13 ] }  }
+exit_state = { accumulator = 0, x = 0x12, y = 0, sp = 0, pc = 0x802, flags = ["N"], memory = { 0 = [ 0x13 ] } }
+
+[trigger-zero]
+entry_state = { accumulator = 0, x = 0x12, y = 0, sp = 0, pc = 0x800, flags = ["C"], memory = { 0 = [ 0x12 ] }  }
+exit_state = { accumulator = 0, x = 0x12, y = 0, sp = 0, pc = 0x802, flags = ["C", "Z"], memory = { 0 = [ 0x12 ] } }

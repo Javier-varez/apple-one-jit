@@ -1538,6 +1538,38 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
         }
     }
 
+    fn emit_cmp_instruction(&mut self, instruction: &mos6502::Instruction) {
+        let register = match instruction.opcode.base_instruction() {
+            mos6502::instructions::BaseInstruction::Cmp => ACCUMULATOR_REGISTER,
+            mos6502::instructions::BaseInstruction::Cpx => X_REGISTER,
+            mos6502::instructions::BaseInstruction::Cpy => Y_REGISTER,
+            _ => unreachable!(),
+        };
+
+        self.emit_deref_if_needed(instruction, DECODED_OP_REGISTER);
+
+        self.emit_save_flags(&[mos6502::Flags::V]);
+        self.opcode_stream
+            .push_opcode(arm_asm::Sxtb::new(register, register).generate());
+        self.opcode_stream
+            .push_opcode(arm_asm::Sxtb::new(DECODED_OP_REGISTER, DECODED_OP_REGISTER).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::Sub::new(TEMP_REG0, register)
+                .with_shifted_reg(DECODED_OP_REGISTER)
+                .update_flags()
+                .with_op_size(arm_asm::OpSize::Size32)
+                .generate(),
+        );
+        self.opcode_stream
+            .push_opcode(arm_asm::SetF8::new(TEMP_REG0).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::And::new(register, register)
+                .with_immediate(arm_asm::Immediate::new(0xFF))
+                .generate(),
+        );
+        self.emit_restore_flags(&[mos6502::Flags::V]);
+    }
+
     /// Handles the actual instruction, assuming that the decoded operand is available in DECODED_OP_REGISTER
     fn emit_instruction(&mut self, instruction: &mos6502::Instruction) {
         match instruction.opcode.base_instruction() {
@@ -1657,9 +1689,15 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             }
 
             // Comparison instructions
-            mos6502::instructions::BaseInstruction::Cmp => todo!(),
-            mos6502::instructions::BaseInstruction::Cpx => todo!(),
-            mos6502::instructions::BaseInstruction::Cpy => todo!(),
+            mos6502::instructions::BaseInstruction::Cmp => {
+                self.emit_cmp_instruction(instruction);
+            }
+            mos6502::instructions::BaseInstruction::Cpx => {
+                self.emit_cmp_instruction(instruction);
+            }
+            mos6502::instructions::BaseInstruction::Cpy => {
+                self.emit_cmp_instruction(instruction);
+            }
 
             // Interrupt functionality
             mos6502::instructions::BaseInstruction::Brk => todo!(),
