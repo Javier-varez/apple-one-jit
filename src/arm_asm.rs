@@ -1525,11 +1525,89 @@ impl Lsl {
     }
 }
 
-pub struct Nop {}
+/// Unsigned Bitfield Extract copies a bitfield of <width> bits starting from bit position <lsb> in
+/// the source register to the least significant bits of the destination register, and sets
+/// destination bits above the bitfield to zero.
+pub struct Ubfx {
+    dest_reg: Register,
+    source_reg: Register,
+    lsb: Immediate<6>,
+    width: Immediate<6>,
+    op_size: OpSize,
+}
+
+impl Ubfx {
+    pub fn new(
+        dest_reg: Register,
+        source_reg: Register,
+        lsb: Immediate<6>,
+        width: Immediate<6>,
+    ) -> Self {
+        assert!(width.0 > 0, "Width must be > 0");
+        Self {
+            dest_reg,
+            source_reg,
+            lsb,
+            width,
+            op_size: OpSize::Size64,
+        }
+    }
+
+    pub fn generate(self) -> OpCode {
+        let immr = Immediate::new(self.lsb.0);
+        let imms = Immediate::new(self.lsb.0 + self.width.0 - 1);
+        Ubfm::new(self.dest_reg, self.source_reg, imms, immr)
+            .with_op_size(self.op_size)
+            .generate()
+    }
+}
+
+/// Bitfield Insert copies a bitfield of <width> bits from the least significant bits of the source
+/// register to bit position <lsb> of the destination register, leaving the other destination bits
+/// unchanged
+pub struct Bfi {
+    dest_reg: Register,
+    source_reg: Register,
+    lsb: Immediate<6>,
+    width: Immediate<6>,
+    op_size: OpSize,
+}
+
+impl Bfi {
+    pub fn new(
+        dest_reg: Register,
+        source_reg: Register,
+        lsb: Immediate<6>,
+        width: Immediate<6>,
+    ) -> Self {
+        assert!(width.0 > 0, "Width must be > 0");
+        Self {
+            dest_reg,
+            source_reg,
+            lsb,
+            width,
+            op_size: OpSize::Size64,
+        }
+    }
+
+    pub fn generate(self) -> OpCode {
+        let neg_lsb = (!self.lsb.0).wrapping_add(1);
+        let immr = Immediate::new(match self.op_size {
+            OpSize::Size32 => neg_lsb % 32,
+            OpSize::Size64 => neg_lsb % 64,
+        });
+        let imms = Immediate::new(self.width.0 - 1);
+        Bfm::new(self.dest_reg, self.source_reg, imms, immr)
+            .with_op_size(self.op_size)
+            .generate()
+    }
+}
+
+pub struct Nop();
 
 impl Nop {
     pub fn new() -> Self {
-        Self {}
+        Self()
     }
 
     pub fn generate(self) -> OpCode {

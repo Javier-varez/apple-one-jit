@@ -178,9 +178,9 @@ impl LocationRange {
 mod test {
     use super::*;
     use crate::arm_asm::{
-        Adc, Add, And, Asr, Branch, Condition, Immediate, LdrLit, Ldrd, Lsl, Lsr, MemoryAccessMode,
-        Mov, MovShift, Movk, Movn, Movz, Mrs, Msr, Nop, OpSize, Or, RegShift, Register, Ret, Sbc,
-        SetF8, SignedImmediate, Strd, Sub, Sxtb, Xor, NZCV,
+        Adc, Add, And, Asr, Bfi, Branch, Condition, Immediate, LdrLit, Ldrd, Lsl, Lsr,
+        MemoryAccessMode, Mov, MovShift, Movk, Movn, Movz, Mrs, Msr, Nop, OpSize, Or, RegShift,
+        Register, Ret, Sbc, SetF8, SignedImmediate, Strd, Sub, Sxtb, Ubfx, Xor, NZCV,
     };
     use region::page;
 
@@ -1217,5 +1217,62 @@ mod test {
         });
 
         unsafe { invoke!(block, extern "C" fn()) };
+    }
+
+    #[test]
+    fn test_ubfx() {
+        let mut block = Block::allocate(page::size()).unwrap();
+
+        for lsb in 0..58 {
+            block.populate(|opcode_stream| {
+                opcode_stream.push_opcode(
+                    Ubfx::new(
+                        Register::X0,
+                        Register::X0,
+                        Immediate::new(lsb),
+                        Immediate::new(6),
+                    )
+                    .generate(),
+                );
+                opcode_stream.push_opcode(Ret::new().generate());
+            });
+
+            let val = unsafe { invoke!(block, extern "C" fn(u64) -> u64, 0xDEADC0DEDEADC0DE) };
+
+            let expected_val = (0xDEADC0DEDEADC0DE_u64 >> lsb) & 0x3f;
+            assert_eq!(val, expected_val);
+        }
+    }
+
+    #[test]
+    fn test_bfi() {
+        let mut block = Block::allocate(page::size()).unwrap();
+
+        for lsb in 0..58 {
+            block.populate(|opcode_stream| {
+                opcode_stream.push_opcode(
+                    Bfi::new(
+                        Register::X0,
+                        Register::X1,
+                        Immediate::new(lsb),
+                        Immediate::new(6),
+                    )
+                    .generate(),
+                );
+                opcode_stream.push_opcode(Ret::new().generate());
+            });
+
+            let val = unsafe {
+                invoke!(
+                    block,
+                    extern "C" fn(u64, u64) -> u64,
+                    0xFFFF_FFFF_FFFF_FFFF,
+                    0xDEADC0DEDEADC0DE
+                )
+            };
+
+            let expected_val = 0xFFFF_FFFF_FFFF_FFFF ^ ((0x3f ^ 0x1E) << lsb);
+            assert_eq!(val, expected_val);
+        }
     }
 }
