@@ -38,7 +38,7 @@ impl AddressingMode {
     }
     pub fn operand_type(&self) -> OperandType {
         match self {
-            AddressingMode::Accumulator => OperandType::Memory,
+            AddressingMode::Accumulator => OperandType::None,
             AddressingMode::Absolute => OperandType::Memory,
             AddressingMode::AbsoluteXIndexed => OperandType::Memory,
             AddressingMode::AbsoluteYIndexed => OperandType::Memory,
