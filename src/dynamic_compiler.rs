@@ -45,6 +45,9 @@ const CALL_ARG1: arm_asm::Register = arm_asm::Register::X1;
 const CALL_ARG2: arm_asm::Register = arm_asm::Register::X2;
 const CALL_RESULT0: arm_asm::Register = arm_asm::Register::X0;
 
+// Temporary registers. Wiped out by function calls
+const TEMP_REG0: arm_asm::Register = arm_asm::Register::X3;
+
 // This is an intra-procedure register, used for the trampoline.
 const TRAMPOLIN_TARGET: arm_asm::Register = arm_asm::Register::X17;
 
@@ -1207,6 +1210,305 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             .push_opcode(arm_asm::Nop::new().generate());
     }
 
+    fn emit_lsr_register_instruction(&mut self, register: arm_asm::Register) {
+        self.opcode_stream
+            .push_opcode(arm_asm::Mrs::new(SCRATCH_REGISTER, arm_asm::NZCV).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::And::new(SCRATCH_REGISTER, SCRATCH_REGISTER)
+                .with_immediate(Immediate::new(Self::flags_mask(&[mos6502::Flags::V])))
+                .generate(),
+        );
+        self.opcode_stream.push_opcode(
+            arm_asm::Bfi::new(
+                SCRATCH_REGISTER,
+                register,
+                Immediate::new(Self::flag_offset(mos6502::Flags::C) as u64),
+                Immediate::new(1),
+            )
+            .generate(),
+        );
+
+        self.opcode_stream
+            .push_opcode(arm_asm::Lsr::new(register, register, Immediate::new(1)).generate());
+        self.opcode_stream
+            .push_opcode(arm_asm::SetF8::new(register).generate());
+
+        self.opcode_stream
+            .push_opcode(arm_asm::Mrs::new(SCRATCH_REGISTER_2, arm_asm::NZCV).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::And::new(SCRATCH_REGISTER_2, SCRATCH_REGISTER_2)
+                .with_immediate(Immediate::new(Self::inverted_flags_mask(&[
+                    mos6502::Flags::V,
+                    mos6502::Flags::C,
+                ])))
+                .generate(),
+        );
+        self.opcode_stream.push_opcode(
+            arm_asm::Or::new(SCRATCH_REGISTER_2, SCRATCH_REGISTER_2)
+                .with_shifted_reg(SCRATCH_REGISTER)
+                .generate(),
+        );
+        self.opcode_stream
+            .push_opcode(arm_asm::Msr::new(arm_asm::NZCV, SCRATCH_REGISTER_2).generate());
+    }
+
+    fn emit_lsr_instruction(&mut self, instruction: &mos6502::Instruction) {
+        match instruction.opcode.addressing_mode().operand_type() {
+            mos6502::addressing_modes::OperandType::None => {
+                // Accumulator
+                self.emit_lsr_register_instruction(ACCUMULATOR_REGISTER);
+            }
+            mos6502::addressing_modes::OperandType::Memory => {
+                // Load into register from memory
+                self.emit_8_byte_load(TEMP_REG0, DECODED_OP_REGISTER);
+                self.emit_lsr_register_instruction(TEMP_REG0);
+                self.emit_8_byte_store(DECODED_OP_REGISTER, TEMP_REG0);
+            }
+            mos6502::addressing_modes::OperandType::Value => {
+                unreachable!();
+            }
+        }
+    }
+
+    fn emit_asl_register_instruction(&mut self, register: arm_asm::Register) {
+        self.opcode_stream
+            .push_opcode(arm_asm::Mrs::new(SCRATCH_REGISTER, arm_asm::NZCV).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::And::new(SCRATCH_REGISTER, SCRATCH_REGISTER)
+                .with_immediate(Immediate::new(Self::flags_mask(&[mos6502::Flags::V])))
+                .generate(),
+        );
+        self.opcode_stream.push_opcode(
+            arm_asm::Lsr::new(SCRATCH_REGISTER_2, register, Immediate::new(7)).generate(),
+        );
+        self.opcode_stream.push_opcode(
+            arm_asm::Bfi::new(
+                SCRATCH_REGISTER,
+                SCRATCH_REGISTER_2,
+                Immediate::new(Self::flag_offset(mos6502::Flags::C) as u64),
+                Immediate::new(1),
+            )
+            .generate(),
+        );
+
+        self.opcode_stream
+            .push_opcode(arm_asm::Lsl::new(register, register, Immediate::new(1)).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::And::new(register, register)
+                .with_immediate(Immediate::new(0xFF))
+                .generate(),
+        );
+        self.opcode_stream
+            .push_opcode(arm_asm::SetF8::new(register).generate());
+
+        self.opcode_stream
+            .push_opcode(arm_asm::Mrs::new(SCRATCH_REGISTER_2, arm_asm::NZCV).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::And::new(SCRATCH_REGISTER_2, SCRATCH_REGISTER_2)
+                .with_immediate(Immediate::new(Self::inverted_flags_mask(&[
+                    mos6502::Flags::V,
+                    mos6502::Flags::C,
+                ])))
+                .generate(),
+        );
+        self.opcode_stream.push_opcode(
+            arm_asm::Or::new(SCRATCH_REGISTER_2, SCRATCH_REGISTER_2)
+                .with_shifted_reg(SCRATCH_REGISTER)
+                .generate(),
+        );
+        self.opcode_stream
+            .push_opcode(arm_asm::Msr::new(arm_asm::NZCV, SCRATCH_REGISTER_2).generate());
+    }
+
+    fn emit_asl_instruction(&mut self, instruction: &mos6502::Instruction) {
+        match instruction.opcode.addressing_mode().operand_type() {
+            mos6502::addressing_modes::OperandType::None => {
+                // Accumulator
+                self.emit_asl_register_instruction(ACCUMULATOR_REGISTER);
+            }
+            mos6502::addressing_modes::OperandType::Memory => {
+                // Load into register from memory
+                self.emit_8_byte_load(TEMP_REG0, DECODED_OP_REGISTER);
+                self.emit_asl_register_instruction(TEMP_REG0);
+                self.emit_8_byte_store(DECODED_OP_REGISTER, TEMP_REG0);
+            }
+            mos6502::addressing_modes::OperandType::Value => {
+                unreachable!();
+            }
+        }
+    }
+
+    fn emit_rol_register_instruction(&mut self, register: arm_asm::Register) {
+        self.opcode_stream
+            .push_opcode(arm_asm::Mrs::new(SCRATCH_REGISTER, arm_asm::NZCV).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::And::new(SCRATCH_REGISTER, SCRATCH_REGISTER)
+                .with_immediate(Immediate::new(Self::flags_mask(&[
+                    mos6502::Flags::V,
+                    mos6502::Flags::C,
+                ])))
+                .generate(),
+        );
+
+        self.opcode_stream
+            .push_opcode(arm_asm::Lsl::new(register, register, Immediate::new(1)).generate());
+
+        // Copy carry to bit 0
+        self.opcode_stream.push_opcode(
+            arm_asm::Bfxil::new(
+                register,
+                SCRATCH_REGISTER,
+                Immediate::new(Self::flag_offset(mos6502::Flags::C) as u64),
+                Immediate::new(1),
+            )
+            .generate(),
+        );
+
+        // Create new carry bit
+        self.opcode_stream.push_opcode(
+            arm_asm::Lsr::new(SCRATCH_REGISTER_2, register, Immediate::new(8)).generate(),
+        );
+        self.opcode_stream.push_opcode(
+            arm_asm::Bfi::new(
+                SCRATCH_REGISTER,
+                SCRATCH_REGISTER_2,
+                Immediate::new(Self::flag_offset(mos6502::Flags::C) as u64),
+                Immediate::new(1),
+            )
+            .generate(),
+        );
+
+        self.opcode_stream.push_opcode(
+            arm_asm::And::new(register, register)
+                .with_immediate(Immediate::new(0xFF))
+                .generate(),
+        );
+        self.opcode_stream
+            .push_opcode(arm_asm::SetF8::new(register).generate());
+
+        self.opcode_stream
+            .push_opcode(arm_asm::Mrs::new(SCRATCH_REGISTER_2, arm_asm::NZCV).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::And::new(SCRATCH_REGISTER_2, SCRATCH_REGISTER_2)
+                .with_immediate(Immediate::new(Self::inverted_flags_mask(&[
+                    mos6502::Flags::V,
+                    mos6502::Flags::C,
+                ])))
+                .generate(),
+        );
+        self.opcode_stream.push_opcode(
+            arm_asm::Or::new(SCRATCH_REGISTER_2, SCRATCH_REGISTER_2)
+                .with_shifted_reg(SCRATCH_REGISTER)
+                .generate(),
+        );
+        self.opcode_stream
+            .push_opcode(arm_asm::Msr::new(arm_asm::NZCV, SCRATCH_REGISTER_2).generate());
+    }
+
+    fn emit_rol_instruction(&mut self, instruction: &mos6502::Instruction) {
+        match instruction.opcode.addressing_mode().operand_type() {
+            mos6502::addressing_modes::OperandType::None => {
+                // Accumulator
+                self.emit_rol_register_instruction(ACCUMULATOR_REGISTER);
+            }
+            mos6502::addressing_modes::OperandType::Memory => {
+                // Load into register from memory
+                self.emit_8_byte_load(TEMP_REG0, DECODED_OP_REGISTER);
+                self.emit_rol_register_instruction(TEMP_REG0);
+                self.emit_8_byte_store(DECODED_OP_REGISTER, TEMP_REG0);
+            }
+            mos6502::addressing_modes::OperandType::Value => {
+                unreachable!();
+            }
+        }
+    }
+
+    fn emit_ror_register_instruction(&mut self, register: arm_asm::Register) {
+        self.opcode_stream
+            .push_opcode(arm_asm::Mrs::new(SCRATCH_REGISTER, arm_asm::NZCV).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::And::new(SCRATCH_REGISTER, SCRATCH_REGISTER)
+                .with_immediate(Immediate::new(Self::flags_mask(&[
+                    mos6502::Flags::V,
+                    mos6502::Flags::C,
+                ])))
+                .generate(),
+        );
+
+        // Save the previous carry in bit 0
+        self.opcode_stream.push_opcode(
+            arm_asm::Bfxil::new(
+                SCRATCH_REGISTER,
+                SCRATCH_REGISTER,
+                Immediate::new(Self::flag_offset(mos6502::Flags::C) as u64),
+                Immediate::new(1),
+            )
+            .generate(),
+        );
+
+        // Set the new carry bit from bit 0 of the current register value
+        self.opcode_stream.push_opcode(
+            arm_asm::Bfi::new(
+                SCRATCH_REGISTER,
+                register,
+                Immediate::new(Self::flag_offset(mos6502::Flags::C) as u64),
+                Immediate::new(1),
+            )
+            .generate(),
+        );
+
+        self.opcode_stream
+            .push_opcode(arm_asm::Lsr::new(register, register, Immediate::new(1)).generate());
+        // Copy carry bit into bit 7 of the result
+        self.opcode_stream.push_opcode(
+            arm_asm::Bfi::new(
+                register,
+                SCRATCH_REGISTER,
+                Immediate::new(7),
+                Immediate::new(1),
+            )
+            .generate(),
+        );
+        self.opcode_stream
+            .push_opcode(arm_asm::SetF8::new(register).generate());
+
+        self.opcode_stream
+            .push_opcode(arm_asm::Mrs::new(SCRATCH_REGISTER_2, arm_asm::NZCV).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::And::new(SCRATCH_REGISTER_2, SCRATCH_REGISTER_2)
+                .with_immediate(Immediate::new(Self::inverted_flags_mask(&[
+                    mos6502::Flags::V,
+                    mos6502::Flags::C,
+                ])))
+                .generate(),
+        );
+        self.opcode_stream.push_opcode(
+            arm_asm::Or::new(SCRATCH_REGISTER_2, SCRATCH_REGISTER_2)
+                .with_shifted_reg(SCRATCH_REGISTER)
+                .generate(),
+        );
+        self.opcode_stream
+            .push_opcode(arm_asm::Msr::new(arm_asm::NZCV, SCRATCH_REGISTER_2).generate());
+    }
+
+    fn emit_ror_instruction(&mut self, instruction: &mos6502::Instruction) {
+        match instruction.opcode.addressing_mode().operand_type() {
+            mos6502::addressing_modes::OperandType::None => {
+                // Accumulator
+                self.emit_ror_register_instruction(ACCUMULATOR_REGISTER);
+            }
+            mos6502::addressing_modes::OperandType::Memory => {
+                // Load into register from memory
+                self.emit_8_byte_load(TEMP_REG0, DECODED_OP_REGISTER);
+                self.emit_ror_register_instruction(TEMP_REG0);
+                self.emit_8_byte_store(DECODED_OP_REGISTER, TEMP_REG0);
+            }
+            mos6502::addressing_modes::OperandType::Value => {
+                unreachable!();
+            }
+        }
+    }
+
     /// Handles the actual instruction, assuming that the decoded operand is available in DECODED_OP_REGISTER
     fn emit_instruction(&mut self, instruction: &mos6502::Instruction) {
         match instruction.opcode.base_instruction() {
@@ -1308,6 +1610,18 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             }
             mos6502::instructions::BaseInstruction::Nop => {
                 self.emit_nop_instruction();
+            }
+            mos6502::instructions::BaseInstruction::Lsr => {
+                self.emit_lsr_instruction(instruction);
+            }
+            mos6502::instructions::BaseInstruction::Asl => {
+                self.emit_asl_instruction(instruction);
+            }
+            mos6502::instructions::BaseInstruction::Rol => {
+                self.emit_rol_instruction(instruction);
+            }
+            mos6502::instructions::BaseInstruction::Ror => {
+                self.emit_ror_instruction(instruction);
             }
             mos6502::instructions::BaseInstruction::Rts => {
                 // TODO(javier-varez): Pop pc from stack and set it before actually returning
