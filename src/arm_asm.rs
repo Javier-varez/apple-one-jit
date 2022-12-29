@@ -17,32 +17,34 @@ pub enum OpSize {
 }
 
 /// Immediate argument for a machine code instruction
+#[derive(Clone, Copy)]
 pub struct Immediate<const BITS: u8>(u64);
 
 /// Signed immediate argument for a machine code instruction
+#[derive(Clone, Copy)]
 pub struct SignedImmediate<const BITS: u8>(i64);
 
 impl<const BITS: u8> Immediate<BITS> {
     /// Constructs a new immediate from the given value
-    pub fn new(val: u64) -> Self {
+    pub fn new(immediate: u64) -> Self {
         let mask = ((1u128 << BITS) - 1) as u64;
-        assert!((val & !mask) == 0);
-        Self(val & mask)
+        assert!((immediate & !mask) == 0);
+        Self(immediate & mask)
     }
 }
 
 impl<const BITS: u8> SignedImmediate<BITS> {
     /// Constructs a new immediate from the given value
-    pub fn new(val: i64) -> Self {
+    pub fn new(immediate: i64) -> Self {
         let mask = ((1u128 << BITS) - 1) as i64;
-        let upper_bits = val & !mask;
-        let expected_upper_bits = if (val & (1 << (BITS - 1))) != 0 {
+        let upper_bits = immediate & !mask;
+        let expected_upper_bits = if (immediate & (1 << (BITS - 1))) != 0 {
             !mask
         } else {
             0
         };
         assert!(upper_bits == expected_upper_bits);
-        Self(val & mask)
+        Self(immediate & mask)
     }
 }
 
@@ -1512,13 +1514,6 @@ impl Lsl {
             OpSize::Size64 => neg_shift % 64,
         });
 
-        println!(
-            "Shift {shift}, imms {imms}, immr {immr}",
-            shift = self.shift.0,
-            imms = imms.0,
-            immr = immr.0
-        );
-
         Ubfm::new(self.dest_reg, self.source_reg, imms, immr)
             .with_op_size(self.op_size)
             .generate()
@@ -1597,6 +1592,43 @@ impl Bfi {
             OpSize::Size64 => neg_lsb % 64,
         });
         let imms = Immediate::new(self.width.0 - 1);
+        Bfm::new(self.dest_reg, self.source_reg, imms, immr)
+            .with_op_size(self.op_size)
+            .generate()
+    }
+}
+
+/// Bitfield Extract and Insert Low copies a bitfield of <width> bits starting from bit position
+/// <lsb> in the source register to the least significant bits of the destination register, leaving
+/// the other destination bits unchanged
+pub struct Bfxil {
+    dest_reg: Register,
+    source_reg: Register,
+    lsb: Immediate<6>,
+    width: Immediate<6>,
+    op_size: OpSize,
+}
+
+impl Bfxil {
+    pub fn new(
+        dest_reg: Register,
+        source_reg: Register,
+        lsb: Immediate<6>,
+        width: Immediate<6>,
+    ) -> Self {
+        assert!(width.0 > 0, "Width must be > 0");
+        Self {
+            dest_reg,
+            source_reg,
+            lsb,
+            width,
+            op_size: OpSize::Size64,
+        }
+    }
+
+    pub fn generate(self) -> OpCode {
+        let immr = self.lsb;
+        let imms = Immediate::new(self.width.0 + self.lsb.0 - 1);
         Bfm::new(self.dest_reg, self.source_reg, imms, immr)
             .with_op_size(self.op_size)
             .generate()
