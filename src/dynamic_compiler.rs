@@ -4,6 +4,7 @@ use crate::arm_asm::{self, Immediate};
 use crate::block::{LocationRange, Marker, OpCodeStream};
 use crate::memory::{Address, MemoryInterface};
 use crate::mos6502;
+use crate::virtual_machine::ExitReason;
 
 #[derive(Debug)]
 pub enum Error {
@@ -48,6 +49,9 @@ const TEMP_REG0: arm_asm::Register = arm_asm::Register::X3;
 // This is an intra-procedure register, used for the trampoline.
 const TRAMPOLINE_TARGET: arm_asm::Register = arm_asm::Register::X17;
 
+// VM Exit reason
+const EXIT_REASON_REG: arm_asm::Register = arm_asm::Register::X0;
+
 type Trampoline = Marker;
 
 struct Trampolines {
@@ -85,10 +89,14 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
                 instr_or_error,
                 Err(mos6502::Error::JamOpCode(TEST_END_OPCODE))
             ) {
-                // Just in case the instruction decoder did not find any isntr
+                self.opcode_stream.push_opcode(
+                    arm_asm::Movz::new(EXIT_REASON_REG)
+                        .with_immediate(Immediate::new(ExitReason::TestEnd as u64))
+                        .generate(),
+                );
                 self.opcode_stream
                     .push_opcode(arm_asm::Ret::new().generate());
-                return Ok(LocationRange::new(start_address, address));
+                break;
             }
 
             if let Some(instr) = instr_or_error? {
@@ -104,10 +112,6 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             }
             address = address.wrapping_add(1);
         }
-
-        // Just in case the instruction decoder did not find any isntr
-        self.opcode_stream
-            .push_opcode(arm_asm::Ret::new().generate());
 
         Ok(LocationRange::new(start_address, address))
     }

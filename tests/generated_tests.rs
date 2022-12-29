@@ -1,5 +1,5 @@
 use apple_one_jit::memory::{Address, MemoryInterface};
-use apple_one_jit::virtual_machine::{VirtualMachine, VmState};
+use apple_one_jit::virtual_machine::{ExitReason, VirtualMachine, VmState};
 use serde::Deserialize;
 
 include!(concat!(env!("OUT_DIR"), "/generated_tests.rs"));
@@ -106,7 +106,7 @@ fn run_test(test_name: &str, program: &[u8], tests_str: &str) {
             flags: translate_flags(&test.entry_state.flags),
         };
 
-        vm.run().unwrap();
+        assert_eq!(vm.run().unwrap(), ExitReason::TestEnd);
 
         let expected_cpu_state = VmState {
             a: test.exit_state.accumulator,

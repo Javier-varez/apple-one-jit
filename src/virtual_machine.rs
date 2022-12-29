@@ -8,7 +8,7 @@ core::arch::global_asm!(include_str!("virtual_machine.S"));
 
 extern "C" {
     #[link_name = "\x01jump_to_emulator"]
-    fn jump_to_emulator(ptr: *const (), state: *mut VmState, memory: *mut ());
+    fn jump_to_emulator(ptr: *const (), state: *mut VmState, memory: *mut ()) -> ExitReason;
 }
 
 #[repr(C)]
@@ -39,6 +39,15 @@ impl From<crate::dynamic_compiler::Error> for Error {
     }
 }
 
+#[repr(C)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum ExitReason {
+    BranchInstruction = 0,
+    BreakInstruction = 1,
+    ReturnInstruction = 2,
+    TestEnd = 3,
+}
+
 pub struct VirtualMachine<'a, T: MemoryInterface> {
     memory_interface: &'a mut T,
     blocks: Vec<(LocationRange, Block)>,
@@ -55,16 +64,14 @@ impl<'a, T: MemoryInterface> VirtualMachine<'a, T> {
     }
 
     /// Runs the dynamically-reassembled code, protecting temporarily the inner page as RX.
-    pub fn run(&mut self) -> Result<(), Error> {
+    pub fn run(&mut self) -> Result<ExitReason, Error> {
         let block_idx = self.ensure_block_for_address(self.state.pc as Address)?;
         let (_, block) = &mut self.blocks[block_idx];
         let memory_iface_ptr: *mut () = self.memory_interface as *mut _ as *mut _;
-        unsafe {
-            block.run(|ptr| {
-                jump_to_emulator(ptr, &mut self.state as *mut VmState, memory_iface_ptr);
-            })
-        };
-        Ok(())
+        Ok(unsafe {
+            block
+                .run(|ptr| jump_to_emulator(ptr, &mut self.state as *mut VmState, memory_iface_ptr))
+        })
     }
 
     fn ensure_block_for_address(&mut self, address: Address) -> Result<usize, Error> {
