@@ -90,10 +90,8 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
                 Err(mos6502::Error::JamOpCode(TEST_END_OPCODE))
             ) {
                 self.emit_vm_exit(ExitReason::TestEnd);
-                break;
-            }
-
-            if let Some(instr) = instr_or_error? {
+                should_continue = false;
+            } else if let Some(instr) = instr_or_error? {
                 println!("Decoded instr {:?}", instr);
                 self.emit_instruction_address_mode(&instr);
                 self.emit_instruction(&instr);
@@ -950,32 +948,6 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
         );
     }
 
-    fn emit_pha_instruction(&mut self) {
-        // Call write_8_bit function
-        self.opcode_stream
-            .push_opcode(arm_asm::Mov::new(CALL_ARG0, MEMORY_INTERFACE_REG).generate());
-        self.opcode_stream.push_opcode(
-            arm_asm::Or::new(CALL_ARG1, SP_REGISTER)
-                .with_immediate(Immediate::new(0x100))
-                .generate(),
-        );
-        self.opcode_stream
-            .push_opcode(arm_asm::Mov::new(CALL_ARG2, ACCUMULATOR_REGISTER).generate());
-        self.emit_function_call(self.trampolines.write_8_bit.clone());
-
-        // Decrement sp with wraparound
-        self.opcode_stream.push_opcode(
-            arm_asm::Sub::new(SP_REGISTER, SP_REGISTER)
-                .with_immediate(Immediate::new(1))
-                .generate(),
-        );
-        self.opcode_stream.push_opcode(
-            arm_asm::And::new(SP_REGISTER, SP_REGISTER)
-                .with_immediate(Immediate::new(0xff))
-                .generate(),
-        );
-    }
-
     const SR_N_OFFSET: usize = 7;
     const SR_V_OFFSET: usize = 6;
     const SR_B_OFFSET: usize = 4;
@@ -1063,18 +1035,21 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             .push_opcode(arm_asm::Msr::new(arm_asm::NZCV, SCRATCH_REGISTER).generate());
     }
 
-    fn emit_php_instruction(&mut self) {
-        // Call write_8_bit function
-        self.opcode_stream
-            .push_opcode(arm_asm::Mov::new(CALL_ARG0, MEMORY_INTERFACE_REG).generate());
+    fn emit_increment_sp(&mut self) {
+        // Increment sp with wraparound
         self.opcode_stream.push_opcode(
-            arm_asm::Or::new(CALL_ARG1, SP_REGISTER)
-                .with_immediate(Immediate::new(0x100))
+            arm_asm::Add::new(SP_REGISTER, SP_REGISTER)
+                .with_immediate(Immediate::new(1))
                 .generate(),
         );
-        self.emit_build_status_register(CALL_ARG2);
-        self.emit_function_call(self.trampolines.write_8_bit.clone());
+        self.opcode_stream.push_opcode(
+            arm_asm::And::new(SP_REGISTER, SP_REGISTER)
+                .with_immediate(Immediate::new(0xff))
+                .generate(),
+        );
+    }
 
+    fn emit_decrement_sp(&mut self) {
         // Decrement sp with wraparound
         self.opcode_stream.push_opcode(
             arm_asm::Sub::new(SP_REGISTER, SP_REGISTER)
@@ -1088,18 +1063,39 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
         );
     }
 
+    fn emit_php_instruction(&mut self) {
+        // Call write_8_bit function
+        self.opcode_stream
+            .push_opcode(arm_asm::Mov::new(CALL_ARG0, MEMORY_INTERFACE_REG).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::Or::new(CALL_ARG1, SP_REGISTER)
+                .with_immediate(Immediate::new(0x100))
+                .generate(),
+        );
+        self.emit_build_status_register(CALL_ARG2);
+        self.emit_function_call(self.trampolines.write_8_bit.clone());
+
+        self.emit_decrement_sp();
+    }
+
+    fn emit_pha_instruction(&mut self) {
+        // Call write_8_bit function
+        self.opcode_stream
+            .push_opcode(arm_asm::Mov::new(CALL_ARG0, MEMORY_INTERFACE_REG).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::Or::new(CALL_ARG1, SP_REGISTER)
+                .with_immediate(Immediate::new(0x100))
+                .generate(),
+        );
+        self.opcode_stream
+            .push_opcode(arm_asm::Mov::new(CALL_ARG2, ACCUMULATOR_REGISTER).generate());
+        self.emit_function_call(self.trampolines.write_8_bit.clone());
+
+        self.emit_decrement_sp();
+    }
+
     fn emit_plp_instruction(&mut self) {
-        // Increment sp with wraparound
-        self.opcode_stream.push_opcode(
-            arm_asm::Add::new(SP_REGISTER, SP_REGISTER)
-                .with_immediate(Immediate::new(1))
-                .generate(),
-        );
-        self.opcode_stream.push_opcode(
-            arm_asm::And::new(SP_REGISTER, SP_REGISTER)
-                .with_immediate(Immediate::new(0xff))
-                .generate(),
-        );
+        self.emit_increment_sp();
 
         // Call read_8_bit function
         self.opcode_stream
@@ -1114,17 +1110,7 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
     }
 
     fn emit_pla_instruction(&mut self) {
-        // Increment sp with wraparound
-        self.opcode_stream.push_opcode(
-            arm_asm::Add::new(SP_REGISTER, SP_REGISTER)
-                .with_immediate(Immediate::new(1))
-                .generate(),
-        );
-        self.opcode_stream.push_opcode(
-            arm_asm::And::new(SP_REGISTER, SP_REGISTER)
-                .with_immediate(Immediate::new(0xff))
-                .generate(),
-        );
+        self.emit_increment_sp();
 
         // Call read_8_bit function
         self.opcode_stream
@@ -1564,12 +1550,6 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
         self.emit_restore_flags(&[mos6502::Flags::V]);
     }
 
-    fn emit_jmp_instruction(&mut self) {
-        self.opcode_stream
-            .push_opcode(arm_asm::Mov::new(PC_REGISTER, DECODED_OP_REGISTER).generate());
-        self.emit_vm_exit(ExitReason::BranchInstruction);
-    }
-
     fn emit_vm_exit(&mut self, reason: ExitReason) {
         self.opcode_stream.push_opcode(
             arm_asm::Movz::new(EXIT_REASON_REG)
@@ -1578,6 +1558,97 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
         );
         self.opcode_stream
             .push_opcode(arm_asm::Ret::new().generate());
+    }
+
+    fn emit_jmp_instruction(&mut self) {
+        self.opcode_stream
+            .push_opcode(arm_asm::Mov::new(PC_REGISTER, DECODED_OP_REGISTER).generate());
+        self.emit_vm_exit(ExitReason::BranchInstruction);
+    }
+
+    fn emit_save_pc_in_stack(&mut self) {
+        self.opcode_stream
+            .push_opcode(arm_asm::Mov::new(CALL_ARG0, MEMORY_INTERFACE_REG).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::Or::new(CALL_ARG1, SP_REGISTER)
+                .with_immediate(Immediate::new(0x100))
+                .generate(),
+        );
+        self.opcode_stream
+            .push_opcode(arm_asm::Lsr::new(CALL_ARG2, PC_REGISTER, Immediate::new(8)).generate());
+        self.emit_function_call(self.trampolines.write_8_bit.clone());
+
+        self.emit_decrement_sp();
+
+        self.opcode_stream
+            .push_opcode(arm_asm::Mov::new(CALL_ARG0, MEMORY_INTERFACE_REG).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::Or::new(CALL_ARG1, SP_REGISTER)
+                .with_immediate(Immediate::new(0x100))
+                .generate(),
+        );
+        self.opcode_stream.push_opcode(
+            arm_asm::And::new(CALL_ARG2, PC_REGISTER)
+                .with_immediate(Immediate::new(0xFF))
+                .generate(),
+        );
+        self.emit_function_call(self.trampolines.write_8_bit.clone());
+
+        self.emit_decrement_sp();
+    }
+
+    fn emit_restore_pc_from_stack(&mut self) {
+        self.emit_increment_sp();
+
+        self.opcode_stream
+            .push_opcode(arm_asm::Mov::new(CALL_ARG0, MEMORY_INTERFACE_REG).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::Or::new(CALL_ARG1, SP_REGISTER)
+                .with_immediate(Immediate::new(0x100))
+                .generate(),
+        );
+        self.emit_function_call(self.trampolines.read_8_bit.clone());
+        self.opcode_stream
+            .push_opcode(arm_asm::Mov::new(PC_REGISTER, CALL_RESULT0).generate());
+
+        self.emit_increment_sp();
+
+        self.opcode_stream
+            .push_opcode(arm_asm::Mov::new(CALL_ARG0, MEMORY_INTERFACE_REG).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::Or::new(CALL_ARG1, SP_REGISTER)
+                .with_immediate(Immediate::new(0x100))
+                .generate(),
+        );
+        self.emit_function_call(self.trampolines.read_8_bit.clone());
+        self.opcode_stream.push_opcode(
+            arm_asm::Lsl::new(CALL_RESULT0, CALL_RESULT0, Immediate::new(8)).generate(),
+        );
+        self.opcode_stream.push_opcode(
+            arm_asm::Or::new(PC_REGISTER, PC_REGISTER)
+                .with_shifted_reg(CALL_RESULT0)
+                .generate(),
+        );
+    }
+
+    fn emit_jsr_instruction(&mut self) {
+        // Increment PC by 3 (jsr uses absolute addressing)
+        self.opcode_stream.push_opcode(
+            arm_asm::Add::new(PC_REGISTER, PC_REGISTER)
+                .with_immediate(Immediate::new(3))
+                .generate(),
+        );
+
+        self.emit_save_pc_in_stack();
+
+        self.opcode_stream
+            .push_opcode(arm_asm::Mov::new(PC_REGISTER, DECODED_OP_REGISTER).generate());
+        self.emit_vm_exit(ExitReason::BranchInstruction);
+    }
+
+    fn emit_rts_instruction(&mut self) {
+        self.emit_restore_pc_from_stack();
+        self.emit_vm_exit(ExitReason::ReturnInstruction);
     }
 
     /// Handles the actual instruction, assuming that the decoded operand is available in DECODED_OP_REGISTER
@@ -1713,8 +1784,12 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             mos6502::instructions::BaseInstruction::Jmp => {
                 self.emit_jmp_instruction();
             }
-            mos6502::instructions::BaseInstruction::Jsr => todo!(),
-            mos6502::instructions::BaseInstruction::Rts => todo!(),
+            mos6502::instructions::BaseInstruction::Jsr => {
+                self.emit_jsr_instruction();
+            }
+            mos6502::instructions::BaseInstruction::Rts => {
+                self.emit_rts_instruction();
+            }
 
             // Conditional branching
             mos6502::instructions::BaseInstruction::Bcs => todo!(),
