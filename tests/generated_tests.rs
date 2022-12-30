@@ -106,7 +106,14 @@ fn run_test(test_name: &str, program: &[u8], tests_str: &str) {
             flags: translate_flags(&test.entry_state.flags),
         };
 
-        assert_eq!(vm.run().unwrap(), ExitReason::TestEnd);
+        loop {
+            let reason = vm.run().unwrap();
+            println!("next instr 0x{:x}", vm.get_state().pc);
+
+            if reason == ExitReason::TestEnd {
+                break;
+            }
+        }
 
         let expected_cpu_state = VmState {
             a: test.exit_state.accumulator,

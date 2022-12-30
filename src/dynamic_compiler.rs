@@ -83,19 +83,13 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
                 .feed(self.memory_interface.read_8_bits(address));
 
             const TEST_END_OPCODE: u8 = 0x02;
-            // Jam opcode 0x1a is treated differently so that tests can stop without returning or
+            // Jam opcode 0x02 is treated differently so that tests can stop without returning or
             // jumping
             if matches!(
                 instr_or_error,
                 Err(mos6502::Error::JamOpCode(TEST_END_OPCODE))
             ) {
-                self.opcode_stream.push_opcode(
-                    arm_asm::Movz::new(EXIT_REASON_REG)
-                        .with_immediate(Immediate::new(ExitReason::TestEnd as u64))
-                        .generate(),
-                );
-                self.opcode_stream
-                    .push_opcode(arm_asm::Ret::new().generate());
+                self.emit_vm_exit(ExitReason::TestEnd);
                 break;
             }
 
@@ -1570,6 +1564,22 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
         self.emit_restore_flags(&[mos6502::Flags::V]);
     }
 
+    fn emit_jmp_instruction(&mut self) {
+        self.opcode_stream
+            .push_opcode(arm_asm::Mov::new(PC_REGISTER, DECODED_OP_REGISTER).generate());
+        self.emit_vm_exit(ExitReason::BranchInstruction);
+    }
+
+    fn emit_vm_exit(&mut self, reason: ExitReason) {
+        self.opcode_stream.push_opcode(
+            arm_asm::Movz::new(EXIT_REASON_REG)
+                .with_immediate(Immediate::new(reason as u64))
+                .generate(),
+        );
+        self.opcode_stream
+            .push_opcode(arm_asm::Ret::new().generate());
+    }
+
     /// Handles the actual instruction, assuming that the decoded operand is available in DECODED_OP_REGISTER
     fn emit_instruction(&mut self, instruction: &mos6502::Instruction) {
         match instruction.opcode.base_instruction() {
@@ -1699,11 +1709,12 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
                 self.emit_cmp_instruction(instruction);
             }
 
-            // Interrupt functionality
-            mos6502::instructions::BaseInstruction::Brk => todo!(),
-            mos6502::instructions::BaseInstruction::Rti => todo!(),
-            mos6502::instructions::BaseInstruction::Cli => todo!(),
-            mos6502::instructions::BaseInstruction::Sei => todo!(),
+            // Unconditional branching
+            mos6502::instructions::BaseInstruction::Jmp => {
+                self.emit_jmp_instruction();
+            }
+            mos6502::instructions::BaseInstruction::Jsr => todo!(),
+            mos6502::instructions::BaseInstruction::Rts => todo!(),
 
             // Conditional branching
             mos6502::instructions::BaseInstruction::Bcs => todo!(),
@@ -1715,10 +1726,11 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             mos6502::instructions::BaseInstruction::Bvs => todo!(),
             mos6502::instructions::BaseInstruction::Bvc => todo!(),
 
-            // Unconditional branching
-            mos6502::instructions::BaseInstruction::Jmp => todo!(),
-            mos6502::instructions::BaseInstruction::Jsr => todo!(),
-            mos6502::instructions::BaseInstruction::Rts => todo!(),
+            // Interrupt functionality
+            mos6502::instructions::BaseInstruction::Brk => todo!(),
+            mos6502::instructions::BaseInstruction::Rti => todo!(),
+            mos6502::instructions::BaseInstruction::Cli => todo!(),
+            mos6502::instructions::BaseInstruction::Sei => todo!(),
         }
     }
 }
