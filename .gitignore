@@ -2,3 +2,4 @@
 .idea
 *.profraw
 coverage_report
+/woz_monitor/build
