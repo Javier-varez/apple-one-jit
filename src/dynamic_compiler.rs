@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
-use crate::arm_asm::{self, Immediate};
-use crate::block::{LocationRange, Marker, OpCodeStream};
+use crate::arm_asm;
+use crate::block::{Block, ExecutableBlock, LocationRange, Marker, OpCodeStream};
 use crate::memory::{Address, MemoryInterface};
 use crate::mos6502;
 use crate::virtual_machine::ExitReason;
@@ -17,11 +17,11 @@ impl From<mos6502::Error> for Error {
     }
 }
 
-pub struct Compiler<'a, 'b: 'a, T: MemoryInterface> {
+pub struct Compiler<'a, T: MemoryInterface> {
     decoder: mos6502::InstrDecoder,
     memory_interface: &'a mut T,
     trampolines: Trampolines,
-    opcode_stream: &'a mut OpCodeStream<'b>,
+    opcode_stream: OpCodeStream,
     _pd: PhantomData<T>,
 }
 
@@ -60,10 +60,11 @@ struct Trampolines {
     read_16_bit: Trampoline,
 }
 
-impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
+impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
     /// Constructs a new dynamic re-compiler
-    pub fn new(opcode_stream: &'a mut OpCodeStream<'b>, memory_interface: &'a mut T) -> Self {
-        let trampolines = Self::emit_trampolines(opcode_stream);
+    pub fn new(block: Block, memory_interface: &'a mut T) -> Self {
+        let mut opcode_stream = block.into_stream();
+        let trampolines = Self::emit_trampolines(&mut opcode_stream);
         Self {
             decoder: mos6502::InstrDecoder::new(),
             memory_interface,
@@ -74,8 +75,12 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
     }
 
     /// Translates the given mos6502 machine code into native arm64 machine code.
-    pub fn translate_code(&mut self, start_address: Address) -> Result<LocationRange, Error> {
+    pub fn translate_code(
+        mut self,
+        start_address: Address,
+    ) -> Result<(LocationRange, ExecutableBlock), Error> {
         let mut address = start_address;
+        let mut current_instr_address = start_address;
         let mut should_continue = true;
         while should_continue {
             let instr_or_error = self
@@ -101,11 +106,15 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
                     self.emit_increment_pc(&instr);
                 }
                 should_continue = self.should_continue(&instr);
+                current_instr_address = address.wrapping_add(1);
             }
             address = address.wrapping_add(1);
         }
 
-        Ok(LocationRange::new(start_address, address))
+        Ok((
+            LocationRange::new(start_address, address),
+            self.opcode_stream.into_executable_code(),
+        ))
     }
 
     fn should_continue(&self, instruction: &mos6502::Instruction) -> bool {
@@ -158,14 +167,14 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
     fn emit_context_save(&mut self) {
         self.opcode_stream.push_opcode(
             arm_asm::Sub::new(arm_asm::Register::SpZr, arm_asm::Register::SpZr)
-                .with_immediate(Immediate::new(0x10))
+                .with_immediate(arm_asm::Immediate::new(0x10))
                 .generate(),
         );
         self.opcode_stream.push_opcode(
             // link register
             arm_asm::Strd::new(arm_asm::Register::X30, arm_asm::Register::SpZr)
                 .with_mode(arm_asm::MemoryAccessMode::UnsignedOffsetImmediate(
-                    Immediate::new(0),
+                    arm_asm::Immediate::new(0),
                 ))
                 .generate(),
         );
@@ -177,7 +186,7 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             // link register
             arm_asm::Strd::new(arm_asm::Register::X30, arm_asm::Register::SpZr)
                 .with_mode(arm_asm::MemoryAccessMode::UnsignedOffsetImmediate(
-                    Immediate::new(1),
+                    arm_asm::Immediate::new(1),
                 ))
                 .generate(),
         );
@@ -188,7 +197,7 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             // link register
             arm_asm::Ldrd::new(arm_asm::Register::X30, arm_asm::Register::SpZr)
                 .with_mode(arm_asm::MemoryAccessMode::UnsignedOffsetImmediate(
-                    Immediate::new(1),
+                    arm_asm::Immediate::new(1),
                 ))
                 .generate(),
         );
@@ -200,13 +209,13 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             // link register
             arm_asm::Ldrd::new(arm_asm::Register::X30, arm_asm::Register::SpZr)
                 .with_mode(arm_asm::MemoryAccessMode::UnsignedOffsetImmediate(
-                    Immediate::new(0),
+                    arm_asm::Immediate::new(0),
                 ))
                 .generate(),
         );
         self.opcode_stream.push_opcode(
             arm_asm::Add::new(arm_asm::Register::SpZr, arm_asm::Register::SpZr)
-                .with_immediate(Immediate::new(0x10))
+                .with_immediate(arm_asm::Immediate::new(0x10))
                 .generate(),
         );
     }
@@ -636,9 +645,9 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             }
         };
 
-        assert!(
-            instruction.opcode.addressing_mode().operand_type()
-                == mos6502::addressing_modes::OperandType::Memory
+        assert_eq!(
+            instruction.opcode.addressing_mode().operand_type(),
+            mos6502::addressing_modes::OperandType::Memory
         );
         self.emit_8_byte_store(DECODED_OP_REGISTER, source_reg);
     }
@@ -858,13 +867,15 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
         // Keep only carry
         self.opcode_stream.push_opcode(
             arm_asm::And::new(SCRATCH_REGISTER, SCRATCH_REGISTER)
-                .with_immediate(Immediate::new(Self::flags_mask(&[mos6502::Flags::C])))
+                .with_immediate(arm_asm::Immediate::new(Self::flags_mask(&[
+                    mos6502::Flags::C,
+                ])))
                 .generate(),
         );
 
         self.opcode_stream.push_opcode(
             arm_asm::And::new(SCRATCH_REGISTER_2, DECODED_OP_REGISTER)
-                .with_immediate(Immediate::new(1 << 7))
+                .with_immediate(arm_asm::Immediate::new(1 << 7))
                 .generate(),
         );
         self.opcode_stream
@@ -874,13 +885,15 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
 
         self.opcode_stream.push_opcode(
             arm_asm::Or::new(SCRATCH_REGISTER, SCRATCH_REGISTER)
-                .with_immediate(Immediate::new(Self::flags_mask(&[mos6502::Flags::N])))
+                .with_immediate(arm_asm::Immediate::new(Self::flags_mask(&[
+                    mos6502::Flags::N,
+                ])))
                 .generate(),
         );
 
         let bit6_marker = self.opcode_stream.push_opcode(
             arm_asm::And::new(SCRATCH_REGISTER_2, DECODED_OP_REGISTER)
-                .with_immediate(Immediate::new(1 << 6))
+                .with_immediate(arm_asm::Immediate::new(1 << 6))
                 .generate(),
         );
         self.opcode_stream
@@ -901,7 +914,9 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
 
         self.opcode_stream.push_opcode(
             arm_asm::Or::new(SCRATCH_REGISTER, SCRATCH_REGISTER)
-                .with_immediate(Immediate::new(Self::flags_mask(&[mos6502::Flags::V])))
+                .with_immediate(arm_asm::Immediate::new(Self::flags_mask(&[
+                    mos6502::Flags::V,
+                ])))
                 .generate(),
         );
 
@@ -928,7 +943,9 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
 
         self.opcode_stream.push_opcode(
             arm_asm::Or::new(SCRATCH_REGISTER, SCRATCH_REGISTER)
-                .with_immediate(Immediate::new(Self::flags_mask(&[mos6502::Flags::Z])))
+                .with_immediate(arm_asm::Immediate::new(Self::flags_mask(&[
+                    mos6502::Flags::Z,
+                ])))
                 .generate(),
         );
 
@@ -970,7 +987,7 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
         // Set initial value
         self.opcode_stream.push_opcode(
             arm_asm::Movz::new(dest_register)
-                .with_immediate(Immediate::new(
+                .with_immediate(arm_asm::Immediate::new(
                     // FIXME(javier-varez): Interrupt flag should not be hardcoded to 0
                     (1 << Self::SR_B_OFFSET) | (0 << Self::SR_D_OFFSET) | (0 << Self::SR_I_OFFSET),
                 ))
@@ -982,14 +999,14 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
                 arm_asm::Lsr::new(
                     SCRATCH_REGISTER_2,
                     SCRATCH_REGISTER,
-                    Immediate::new((source_flag - dest_flag) as u64),
+                    arm_asm::Immediate::new((source_flag - dest_flag) as u64),
                 )
                 .generate(),
             );
 
             self.opcode_stream.push_opcode(
                 arm_asm::And::new(SCRATCH_REGISTER_2, SCRATCH_REGISTER_2)
-                    .with_immediate(Immediate::new(1 << dest_flag))
+                    .with_immediate(arm_asm::Immediate::new(1 << dest_flag))
                     .generate(),
             );
 
@@ -1004,14 +1021,14 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
     fn emit_restore_status_reg(&mut self, src_reg: arm_asm::Register) {
         self.opcode_stream.push_opcode(
             arm_asm::Movz::new(SCRATCH_REGISTER)
-                .with_immediate(Immediate::new(0))
+                .with_immediate(arm_asm::Immediate::new(0))
                 .generate(),
         );
 
         for (dest_flag, source_flag) in Self::FLAG_TRANSLATIONS {
             self.opcode_stream.push_opcode(
                 arm_asm::And::new(SCRATCH_REGISTER_2, src_reg)
-                    .with_immediate(Immediate::new(1 << source_flag))
+                    .with_immediate(arm_asm::Immediate::new(1 << source_flag))
                     .generate(),
             );
 
@@ -1019,7 +1036,7 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
                 arm_asm::Lsl::new(
                     SCRATCH_REGISTER_2,
                     SCRATCH_REGISTER_2,
-                    Immediate::new((dest_flag - source_flag) as u64),
+                    arm_asm::Immediate::new((dest_flag - source_flag) as u64),
                 )
                 .generate(),
             );
@@ -1039,12 +1056,12 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
         // Increment sp with wraparound
         self.opcode_stream.push_opcode(
             arm_asm::Add::new(SP_REGISTER, SP_REGISTER)
-                .with_immediate(Immediate::new(1))
+                .with_immediate(arm_asm::Immediate::new(1))
                 .generate(),
         );
         self.opcode_stream.push_opcode(
             arm_asm::And::new(SP_REGISTER, SP_REGISTER)
-                .with_immediate(Immediate::new(0xff))
+                .with_immediate(arm_asm::Immediate::new(0xff))
                 .generate(),
         );
     }
@@ -1053,12 +1070,12 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
         // Decrement sp with wraparound
         self.opcode_stream.push_opcode(
             arm_asm::Sub::new(SP_REGISTER, SP_REGISTER)
-                .with_immediate(Immediate::new(1))
+                .with_immediate(arm_asm::Immediate::new(1))
                 .generate(),
         );
         self.opcode_stream.push_opcode(
             arm_asm::And::new(SP_REGISTER, SP_REGISTER)
-                .with_immediate(Immediate::new(0xff))
+                .with_immediate(arm_asm::Immediate::new(0xff))
                 .generate(),
         );
     }
@@ -1069,7 +1086,7 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             .push_opcode(arm_asm::Mov::new(CALL_ARG0, MEMORY_INTERFACE_REG).generate());
         self.opcode_stream.push_opcode(
             arm_asm::Or::new(CALL_ARG1, SP_REGISTER)
-                .with_immediate(Immediate::new(0x100))
+                .with_immediate(arm_asm::Immediate::new(0x100))
                 .generate(),
         );
         self.emit_build_status_register(CALL_ARG2);
@@ -1084,7 +1101,7 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             .push_opcode(arm_asm::Mov::new(CALL_ARG0, MEMORY_INTERFACE_REG).generate());
         self.opcode_stream.push_opcode(
             arm_asm::Or::new(CALL_ARG1, SP_REGISTER)
-                .with_immediate(Immediate::new(0x100))
+                .with_immediate(arm_asm::Immediate::new(0x100))
                 .generate(),
         );
         self.opcode_stream
@@ -1102,7 +1119,7 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             .push_opcode(arm_asm::Mov::new(CALL_ARG0, MEMORY_INTERFACE_REG).generate());
         self.opcode_stream.push_opcode(
             arm_asm::Or::new(CALL_ARG1, SP_REGISTER)
-                .with_immediate(Immediate::new(0x100))
+                .with_immediate(arm_asm::Immediate::new(0x100))
                 .generate(),
         );
         self.emit_function_call(self.trampolines.read_8_bit.clone());
@@ -1117,7 +1134,7 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             .push_opcode(arm_asm::Mov::new(CALL_ARG0, MEMORY_INTERFACE_REG).generate());
         self.opcode_stream.push_opcode(
             arm_asm::Or::new(CALL_ARG1, SP_REGISTER)
-                .with_immediate(Immediate::new(0x100))
+                .with_immediate(arm_asm::Immediate::new(0x100))
                 .generate(),
         );
         self.emit_function_call(self.trampolines.read_8_bit.clone());
@@ -1137,7 +1154,7 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
 
         self.opcode_stream.push_opcode(
             arm_asm::Sub::new(CALL_RESULT0, CALL_RESULT0)
-                .with_immediate(Immediate::new(1))
+                .with_immediate(arm_asm::Immediate::new(1))
                 .generate(),
         );
 
@@ -1157,7 +1174,7 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
 
         self.opcode_stream.push_opcode(
             arm_asm::Add::new(CALL_RESULT0, CALL_RESULT0)
-                .with_immediate(Immediate::new(1))
+                .with_immediate(arm_asm::Immediate::new(1))
                 .generate(),
         );
 
@@ -1175,7 +1192,7 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
     fn emit_dec_index_instruction(&mut self, register: arm_asm::Register) {
         self.opcode_stream.push_opcode(
             arm_asm::Sub::new(register, register)
-                .with_immediate(Immediate::new(1))
+                .with_immediate(arm_asm::Immediate::new(1))
                 .generate(),
         );
 
@@ -1188,7 +1205,7 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
         // Make sure it is still 8-bit
         self.opcode_stream.push_opcode(
             arm_asm::And::new(register, register)
-                .with_immediate(Immediate::new(0xff))
+                .with_immediate(arm_asm::Immediate::new(0xff))
                 .generate(),
         );
     }
@@ -1196,7 +1213,7 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
     fn emit_inc_index_instruction(&mut self, register: arm_asm::Register) {
         self.opcode_stream.push_opcode(
             arm_asm::Add::new(register, register)
-                .with_immediate(Immediate::new(1))
+                .with_immediate(arm_asm::Immediate::new(1))
                 .generate(),
         );
 
@@ -1209,7 +1226,7 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
         // Make sure it is still 8-bit
         self.opcode_stream.push_opcode(
             arm_asm::And::new(register, register)
-                .with_immediate(Immediate::new(0xff))
+                .with_immediate(arm_asm::Immediate::new(0xff))
                 .generate(),
         );
     }
@@ -1224,21 +1241,24 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             .push_opcode(arm_asm::Mrs::new(SCRATCH_REGISTER, arm_asm::NZCV).generate());
         self.opcode_stream.push_opcode(
             arm_asm::And::new(SCRATCH_REGISTER, SCRATCH_REGISTER)
-                .with_immediate(Immediate::new(Self::flags_mask(&[mos6502::Flags::V])))
+                .with_immediate(arm_asm::Immediate::new(Self::flags_mask(&[
+                    mos6502::Flags::V,
+                ])))
                 .generate(),
         );
         self.opcode_stream.push_opcode(
             arm_asm::Bfi::new(
                 SCRATCH_REGISTER,
                 register,
-                Immediate::new(Self::flag_offset(mos6502::Flags::C) as u64),
-                Immediate::new(1),
+                arm_asm::Immediate::new(Self::flag_offset(mos6502::Flags::C) as u64),
+                arm_asm::Immediate::new(1),
             )
             .generate(),
         );
 
-        self.opcode_stream
-            .push_opcode(arm_asm::Lsr::new(register, register, Immediate::new(1)).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::Lsr::new(register, register, arm_asm::Immediate::new(1)).generate(),
+        );
         self.opcode_stream
             .push_opcode(arm_asm::SetF8::new(register).generate());
 
@@ -1246,7 +1266,7 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             .push_opcode(arm_asm::Mrs::new(SCRATCH_REGISTER_2, arm_asm::NZCV).generate());
         self.opcode_stream.push_opcode(
             arm_asm::And::new(SCRATCH_REGISTER_2, SCRATCH_REGISTER_2)
-                .with_immediate(Immediate::new(Self::inverted_flags_mask(&[
+                .with_immediate(arm_asm::Immediate::new(Self::inverted_flags_mask(&[
                     mos6502::Flags::V,
                     mos6502::Flags::C,
                 ])))
@@ -1284,27 +1304,30 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             .push_opcode(arm_asm::Mrs::new(SCRATCH_REGISTER, arm_asm::NZCV).generate());
         self.opcode_stream.push_opcode(
             arm_asm::And::new(SCRATCH_REGISTER, SCRATCH_REGISTER)
-                .with_immediate(Immediate::new(Self::flags_mask(&[mos6502::Flags::V])))
+                .with_immediate(arm_asm::Immediate::new(Self::flags_mask(&[
+                    mos6502::Flags::V,
+                ])))
                 .generate(),
         );
         self.opcode_stream.push_opcode(
-            arm_asm::Lsr::new(SCRATCH_REGISTER_2, register, Immediate::new(7)).generate(),
+            arm_asm::Lsr::new(SCRATCH_REGISTER_2, register, arm_asm::Immediate::new(7)).generate(),
         );
         self.opcode_stream.push_opcode(
             arm_asm::Bfi::new(
                 SCRATCH_REGISTER,
                 SCRATCH_REGISTER_2,
-                Immediate::new(Self::flag_offset(mos6502::Flags::C) as u64),
-                Immediate::new(1),
+                arm_asm::Immediate::new(Self::flag_offset(mos6502::Flags::C) as u64),
+                arm_asm::Immediate::new(1),
             )
             .generate(),
         );
 
-        self.opcode_stream
-            .push_opcode(arm_asm::Lsl::new(register, register, Immediate::new(1)).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::Lsl::new(register, register, arm_asm::Immediate::new(1)).generate(),
+        );
         self.opcode_stream.push_opcode(
             arm_asm::And::new(register, register)
-                .with_immediate(Immediate::new(0xFF))
+                .with_immediate(arm_asm::Immediate::new(0xFF))
                 .generate(),
         );
         self.opcode_stream
@@ -1314,7 +1337,7 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             .push_opcode(arm_asm::Mrs::new(SCRATCH_REGISTER_2, arm_asm::NZCV).generate());
         self.opcode_stream.push_opcode(
             arm_asm::And::new(SCRATCH_REGISTER_2, SCRATCH_REGISTER_2)
-                .with_immediate(Immediate::new(Self::inverted_flags_mask(&[
+                .with_immediate(arm_asm::Immediate::new(Self::inverted_flags_mask(&[
                     mos6502::Flags::V,
                     mos6502::Flags::C,
                 ])))
@@ -1352,44 +1375,45 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             .push_opcode(arm_asm::Mrs::new(SCRATCH_REGISTER, arm_asm::NZCV).generate());
         self.opcode_stream.push_opcode(
             arm_asm::And::new(SCRATCH_REGISTER, SCRATCH_REGISTER)
-                .with_immediate(Immediate::new(Self::flags_mask(&[
+                .with_immediate(arm_asm::Immediate::new(Self::flags_mask(&[
                     mos6502::Flags::V,
                     mos6502::Flags::C,
                 ])))
                 .generate(),
         );
 
-        self.opcode_stream
-            .push_opcode(arm_asm::Lsl::new(register, register, Immediate::new(1)).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::Lsl::new(register, register, arm_asm::Immediate::new(1)).generate(),
+        );
 
         // Copy carry to bit 0
         self.opcode_stream.push_opcode(
             arm_asm::Bfxil::new(
                 register,
                 SCRATCH_REGISTER,
-                Immediate::new(Self::flag_offset(mos6502::Flags::C) as u64),
-                Immediate::new(1),
+                arm_asm::Immediate::new(Self::flag_offset(mos6502::Flags::C) as u64),
+                arm_asm::Immediate::new(1),
             )
             .generate(),
         );
 
         // Create new carry bit
         self.opcode_stream.push_opcode(
-            arm_asm::Lsr::new(SCRATCH_REGISTER_2, register, Immediate::new(8)).generate(),
+            arm_asm::Lsr::new(SCRATCH_REGISTER_2, register, arm_asm::Immediate::new(8)).generate(),
         );
         self.opcode_stream.push_opcode(
             arm_asm::Bfi::new(
                 SCRATCH_REGISTER,
                 SCRATCH_REGISTER_2,
-                Immediate::new(Self::flag_offset(mos6502::Flags::C) as u64),
-                Immediate::new(1),
+                arm_asm::Immediate::new(Self::flag_offset(mos6502::Flags::C) as u64),
+                arm_asm::Immediate::new(1),
             )
             .generate(),
         );
 
         self.opcode_stream.push_opcode(
             arm_asm::And::new(register, register)
-                .with_immediate(Immediate::new(0xFF))
+                .with_immediate(arm_asm::Immediate::new(0xFF))
                 .generate(),
         );
         self.opcode_stream
@@ -1399,7 +1423,7 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             .push_opcode(arm_asm::Mrs::new(SCRATCH_REGISTER_2, arm_asm::NZCV).generate());
         self.opcode_stream.push_opcode(
             arm_asm::And::new(SCRATCH_REGISTER_2, SCRATCH_REGISTER_2)
-                .with_immediate(Immediate::new(Self::inverted_flags_mask(&[
+                .with_immediate(arm_asm::Immediate::new(Self::inverted_flags_mask(&[
                     mos6502::Flags::V,
                     mos6502::Flags::C,
                 ])))
@@ -1437,7 +1461,7 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             .push_opcode(arm_asm::Mrs::new(SCRATCH_REGISTER, arm_asm::NZCV).generate());
         self.opcode_stream.push_opcode(
             arm_asm::And::new(SCRATCH_REGISTER, SCRATCH_REGISTER)
-                .with_immediate(Immediate::new(Self::flags_mask(&[
+                .with_immediate(arm_asm::Immediate::new(Self::flags_mask(&[
                     mos6502::Flags::V,
                     mos6502::Flags::C,
                 ])))
@@ -1449,8 +1473,8 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             arm_asm::Bfxil::new(
                 SCRATCH_REGISTER,
                 SCRATCH_REGISTER,
-                Immediate::new(Self::flag_offset(mos6502::Flags::C) as u64),
-                Immediate::new(1),
+                arm_asm::Immediate::new(Self::flag_offset(mos6502::Flags::C) as u64),
+                arm_asm::Immediate::new(1),
             )
             .generate(),
         );
@@ -1460,21 +1484,22 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             arm_asm::Bfi::new(
                 SCRATCH_REGISTER,
                 register,
-                Immediate::new(Self::flag_offset(mos6502::Flags::C) as u64),
-                Immediate::new(1),
+                arm_asm::Immediate::new(Self::flag_offset(mos6502::Flags::C) as u64),
+                arm_asm::Immediate::new(1),
             )
             .generate(),
         );
 
-        self.opcode_stream
-            .push_opcode(arm_asm::Lsr::new(register, register, Immediate::new(1)).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::Lsr::new(register, register, arm_asm::Immediate::new(1)).generate(),
+        );
         // Copy carry bit into bit 7 of the result
         self.opcode_stream.push_opcode(
             arm_asm::Bfi::new(
                 register,
                 SCRATCH_REGISTER,
-                Immediate::new(7),
-                Immediate::new(1),
+                arm_asm::Immediate::new(7),
+                arm_asm::Immediate::new(1),
             )
             .generate(),
         );
@@ -1485,7 +1510,7 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             .push_opcode(arm_asm::Mrs::new(SCRATCH_REGISTER_2, arm_asm::NZCV).generate());
         self.opcode_stream.push_opcode(
             arm_asm::And::new(SCRATCH_REGISTER_2, SCRATCH_REGISTER_2)
-                .with_immediate(Immediate::new(Self::inverted_flags_mask(&[
+                .with_immediate(arm_asm::Immediate::new(Self::inverted_flags_mask(&[
                     mos6502::Flags::V,
                     mos6502::Flags::C,
                 ])))
@@ -1553,7 +1578,7 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
     fn emit_vm_exit(&mut self, reason: ExitReason) {
         self.opcode_stream.push_opcode(
             arm_asm::Movz::new(EXIT_REASON_REG)
-                .with_immediate(Immediate::new(reason as u64))
+                .with_immediate(arm_asm::Immediate::new(reason as u64))
                 .generate(),
         );
         self.opcode_stream
@@ -1571,11 +1596,12 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             .push_opcode(arm_asm::Mov::new(CALL_ARG0, MEMORY_INTERFACE_REG).generate());
         self.opcode_stream.push_opcode(
             arm_asm::Or::new(CALL_ARG1, SP_REGISTER)
-                .with_immediate(Immediate::new(0x100))
+                .with_immediate(arm_asm::Immediate::new(0x100))
                 .generate(),
         );
-        self.opcode_stream
-            .push_opcode(arm_asm::Lsr::new(CALL_ARG2, PC_REGISTER, Immediate::new(8)).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::Lsr::new(CALL_ARG2, PC_REGISTER, arm_asm::Immediate::new(8)).generate(),
+        );
         self.emit_function_call(self.trampolines.write_8_bit.clone());
 
         self.emit_decrement_sp();
@@ -1584,12 +1610,12 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             .push_opcode(arm_asm::Mov::new(CALL_ARG0, MEMORY_INTERFACE_REG).generate());
         self.opcode_stream.push_opcode(
             arm_asm::Or::new(CALL_ARG1, SP_REGISTER)
-                .with_immediate(Immediate::new(0x100))
+                .with_immediate(arm_asm::Immediate::new(0x100))
                 .generate(),
         );
         self.opcode_stream.push_opcode(
             arm_asm::And::new(CALL_ARG2, PC_REGISTER)
-                .with_immediate(Immediate::new(0xFF))
+                .with_immediate(arm_asm::Immediate::new(0xFF))
                 .generate(),
         );
         self.emit_function_call(self.trampolines.write_8_bit.clone());
@@ -1604,7 +1630,7 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             .push_opcode(arm_asm::Mov::new(CALL_ARG0, MEMORY_INTERFACE_REG).generate());
         self.opcode_stream.push_opcode(
             arm_asm::Or::new(CALL_ARG1, SP_REGISTER)
-                .with_immediate(Immediate::new(0x100))
+                .with_immediate(arm_asm::Immediate::new(0x100))
                 .generate(),
         );
         self.emit_function_call(self.trampolines.read_8_bit.clone());
@@ -1617,12 +1643,12 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
             .push_opcode(arm_asm::Mov::new(CALL_ARG0, MEMORY_INTERFACE_REG).generate());
         self.opcode_stream.push_opcode(
             arm_asm::Or::new(CALL_ARG1, SP_REGISTER)
-                .with_immediate(Immediate::new(0x100))
+                .with_immediate(arm_asm::Immediate::new(0x100))
                 .generate(),
         );
         self.emit_function_call(self.trampolines.read_8_bit.clone());
         self.opcode_stream.push_opcode(
-            arm_asm::Lsl::new(CALL_RESULT0, CALL_RESULT0, Immediate::new(8)).generate(),
+            arm_asm::Lsl::new(CALL_RESULT0, CALL_RESULT0, arm_asm::Immediate::new(8)).generate(),
         );
         self.opcode_stream.push_opcode(
             arm_asm::Or::new(PC_REGISTER, PC_REGISTER)
@@ -1635,7 +1661,7 @@ impl<'a, 'b: 'a, T: MemoryInterface + 'a> Compiler<'a, 'b, T> {
         // Increment PC by 3 (jsr uses absolute addressing)
         self.opcode_stream.push_opcode(
             arm_asm::Add::new(PC_REGISTER, PC_REGISTER)
-                .with_immediate(Immediate::new(3))
+                .with_immediate(arm_asm::Immediate::new(3))
                 .generate(),
         );
 

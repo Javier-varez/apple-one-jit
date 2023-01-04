@@ -1,5 +1,5 @@
 use crate::{
-    block::{Block, LocationRange},
+    block::{Block, ExecutableBlock, LocationRange},
     dynamic_compiler::{self, Compiler},
     memory::{Address, MemoryInterface},
 };
@@ -50,7 +50,7 @@ pub enum ExitReason {
 
 pub struct VirtualMachine<'a, T: MemoryInterface> {
     memory_interface: &'a mut T,
-    blocks: Vec<(LocationRange, Block)>,
+    blocks: Vec<(LocationRange, ExecutableBlock)>,
     state: VmState,
 }
 
@@ -85,11 +85,9 @@ impl<'a, T: MemoryInterface> VirtualMachine<'a, T> {
             return Ok(idx);
         }
 
-        let mut block = Block::allocate(region::page::size())?;
-        let location = block.populate(|opcode_stream| {
-            let mut compiler = Compiler::new(opcode_stream, self.memory_interface);
-            compiler.translate_code(address)
-        })?;
+        let block = Block::allocate(region::page::size())?;
+        let compiler = Compiler::new(block, self.memory_interface);
+        let (location, block) = compiler.translate_code(address)?;
         self.blocks.push((location, block));
         Ok(self.blocks.len() - 1)
     }
