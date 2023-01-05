@@ -108,7 +108,9 @@ fn run_test(test_name: &str, program: &[u8], tests_str: &str) {
 
         loop {
             let reason = vm.run().unwrap();
+            println!("exit reason {:?}", reason);
             println!("next instr 0x{:x}", vm.get_state().pc);
+            println!("status {:?}", vm.get_state());
 
             if reason == ExitReason::TestEnd {
                 break;

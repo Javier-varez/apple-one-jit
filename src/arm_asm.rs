@@ -308,8 +308,6 @@ mod branch {
             const IMM_OFFSET: usize = 5;
 
             let immediate = self.immediate.unwrap().0;
-            let extra_bits = immediate & !IMM_MASK;
-            assert!((extra_bits == 0) || (extra_bits == !IMM_MASK));
             let immediate = ((immediate & IMM_MASK) as u32) << IMM_OFFSET;
 
             OpCode(BASE | immediate | (self.condition.unwrap() as u32))

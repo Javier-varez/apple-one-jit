@@ -58,6 +58,7 @@ struct Trampolines {
     write_8_bit: Trampoline,
     read_8_bit: Trampoline,
     read_16_bit: Trampoline,
+    cond_branch: Trampoline,
 }
 
 impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
@@ -147,8 +148,19 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
         let read_16_bit_marker = opcode_stream.push_pointer(read_16_bit_func);
         let write_8_bit_marker = opcode_stream.push_pointer(write_8_bit_func);
 
-        let jump_target =
-            opcode_stream.relative_distance(&write_8_bit_marker.next(), &forward_jump_marker);
+        let conditional_branch_marker = opcode_stream
+            .push_opcode(arm_asm::Mov::new(PC_REGISTER, DECODED_OP_REGISTER).generate());
+        opcode_stream.push_opcode(
+            arm_asm::Movz::new(EXIT_REASON_REG)
+                .with_immediate(arm_asm::Immediate::new(
+                    ExitReason::BranchInstruction as u64,
+                ))
+                .generate(),
+        );
+        opcode_stream.push_opcode(arm_asm::Ret::new().generate());
+
+        let current_marker = opcode_stream.get_current_marker();
+        let jump_target = opcode_stream.relative_distance(&current_marker, &forward_jump_marker);
 
         opcode_stream.patch_opcode(
             &forward_jump_marker,
@@ -162,6 +174,7 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
             read_8_bit: read_8_bit_marker,
             read_16_bit: read_16_bit_marker,
             write_8_bit: write_8_bit_marker,
+            cond_branch: conditional_branch_marker,
         }
     }
 
@@ -436,9 +449,36 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
         }
     }
 
-    fn emit_addr_mode_relative(&mut self, _instruction: &mos6502::Instruction) {
-        // TODO(javier-varez): This cannot be implemented until ldr and str instructions are available in arm_asm
-        unimplemented!();
+    fn emit_addr_mode_relative(&mut self, instruction: &mos6502::Instruction) {
+        let mos6502::addressing_modes::Operand::U8(value) = instruction.operand else {
+                    panic!("Unexpected operand type {:?} for AddressingMode::Relative", instruction.operand);
+                };
+
+        self.opcode_stream.push_opcode(
+            arm_asm::Movz::new(DECODED_OP_REGISTER)
+                .with_immediate(arm_asm::Immediate::new(value as u64))
+                .generate(),
+        );
+        self.opcode_stream
+            .push_opcode(arm_asm::Sxtb::new(DECODED_OP_REGISTER, DECODED_OP_REGISTER).generate());
+        self.opcode_stream.push_opcode(
+            arm_asm::Add::new(DECODED_OP_REGISTER, DECODED_OP_REGISTER)
+                .with_shifted_reg(PC_REGISTER)
+                .generate(),
+        );
+        // Should take into account the next instruction size too
+        self.opcode_stream.push_opcode(
+            arm_asm::Add::new(DECODED_OP_REGISTER, DECODED_OP_REGISTER)
+                .with_immediate(arm_asm::Immediate::new(
+                    instruction.instruction_size() as u64
+                ))
+                .generate(),
+        );
+        self.opcode_stream.push_opcode(
+            arm_asm::And::new(DECODED_OP_REGISTER, DECODED_OP_REGISTER)
+                .with_immediate(arm_asm::Immediate::new(0xFFFF))
+                .generate(),
+        );
     }
 
     fn emit_addr_mode_zeropage(&mut self, instruction: &mos6502::Instruction) {
@@ -1678,6 +1718,26 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
         self.emit_vm_exit(ExitReason::ReturnInstruction);
     }
 
+    fn emit_branch_instruction(
+        &mut self,
+        instruction: &mos6502::Instruction,
+        condition: arm_asm::Condition,
+    ) {
+        let current_marker = self.opcode_stream.get_current_marker();
+        let jump_target = self
+            .opcode_stream
+            .relative_distance(&self.trampolines.cond_branch, &current_marker);
+        // Jump to some address where all branches are handled
+        self.opcode_stream.push_opcode(
+            arm_asm::Branch::new()
+                // TODO(javier-varez): Fix this with a valid jump target
+                .with_immediate(arm_asm::SignedImmediate::new(jump_target))
+                .iff(condition)
+                .generate(),
+        );
+        self.emit_increment_pc(instruction);
+    }
+
     /// Handles the actual instruction, assuming that the decoded operand is available in DECODED_OP_REGISTER
     fn emit_instruction(&mut self, instruction: &mos6502::Instruction) {
         match instruction.opcode.base_instruction() {
@@ -1819,14 +1879,30 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
             }
 
             // Conditional branching
-            mos6502::instructions::BaseInstruction::Bcs => todo!(),
-            mos6502::instructions::BaseInstruction::Bcc => todo!(),
-            mos6502::instructions::BaseInstruction::Beq => todo!(),
-            mos6502::instructions::BaseInstruction::Bne => todo!(),
-            mos6502::instructions::BaseInstruction::Bmi => todo!(),
-            mos6502::instructions::BaseInstruction::Bpl => todo!(),
-            mos6502::instructions::BaseInstruction::Bvs => todo!(),
-            mos6502::instructions::BaseInstruction::Bvc => todo!(),
+            mos6502::instructions::BaseInstruction::Bcs => {
+                self.emit_branch_instruction(instruction, arm_asm::Condition::Cs);
+            }
+            mos6502::instructions::BaseInstruction::Bcc => {
+                self.emit_branch_instruction(instruction, arm_asm::Condition::Cc);
+            }
+            mos6502::instructions::BaseInstruction::Beq => {
+                self.emit_branch_instruction(instruction, arm_asm::Condition::Eq);
+            }
+            mos6502::instructions::BaseInstruction::Bne => {
+                self.emit_branch_instruction(instruction, arm_asm::Condition::Ne);
+            }
+            mos6502::instructions::BaseInstruction::Bmi => {
+                self.emit_branch_instruction(instruction, arm_asm::Condition::Mi);
+            }
+            mos6502::instructions::BaseInstruction::Bpl => {
+                self.emit_branch_instruction(instruction, arm_asm::Condition::Pl);
+            }
+            mos6502::instructions::BaseInstruction::Bvs => {
+                self.emit_branch_instruction(instruction, arm_asm::Condition::Vs);
+            }
+            mos6502::instructions::BaseInstruction::Bvc => {
+                self.emit_branch_instruction(instruction, arm_asm::Condition::Vc);
+            }
 
             // Interrupt functionality
             mos6502::instructions::BaseInstruction::Brk => todo!(),
