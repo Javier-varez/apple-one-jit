@@ -1,4 +1,4 @@
-use apple_one_jit::memory::{Address, MemoryInterface};
+use apple_one_jit::memory::{MemoryInterface, TargetAddress};
 use apple_one_jit::virtual_machine::{ExitReason, VirtualMachine, VmState};
 use serde::Deserialize;
 
@@ -9,15 +9,15 @@ struct Memory<'a> {
 }
 
 impl<'a> MemoryInterface for Memory<'a> {
-    extern "C" fn read_8_bits(&self, addr: Address) -> u8 {
+    extern "C" fn read_8_bits(&self, addr: TargetAddress) -> u8 {
         let mem = self.memory.borrow_mut();
         mem[addr as usize]
     }
-    extern "C" fn read_16_bits(&self, addr: Address) -> u16 {
+    extern "C" fn read_16_bits(&self, addr: TargetAddress) -> u16 {
         let mem = self.memory.borrow();
         (mem[addr as usize] as u16) | ((mem[(addr + 1) as usize] as u16) << 8)
     }
-    extern "C" fn write_8_bits(&mut self, addr: Address, data: u8) {
+    extern "C" fn write_8_bits(&mut self, addr: TargetAddress, data: u8) {
         let mut mem = self.memory.borrow_mut();
         mem[addr as usize] = data;
     }

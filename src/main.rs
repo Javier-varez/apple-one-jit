@@ -6,13 +6,13 @@ use apple_one_jit::virtual_machine::VirtualMachine;
 struct Memory {}
 
 impl MemoryInterface for Memory {
-    extern "C" fn read_8_bits(&self, _addr: apple_one_jit::memory::Address) -> u8 {
+    extern "C" fn read_8_bits(&self, _addr: apple_one_jit::memory::TargetAddress) -> u8 {
         0
     }
-    extern "C" fn read_16_bits(&self, _addr: apple_one_jit::memory::Address) -> u16 {
+    extern "C" fn read_16_bits(&self, _addr: apple_one_jit::memory::TargetAddress) -> u16 {
         0
     }
-    extern "C" fn write_8_bits(&mut self, _addr: apple_one_jit::memory::Address, _data: u8) {}
+    extern "C" fn write_8_bits(&mut self, _addr: apple_one_jit::memory::TargetAddress, _data: u8) {}
 }
 
 fn main() {

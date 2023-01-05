@@ -1,6 +1,5 @@
 use crate::{
     arm_asm::{OpCode, Udf},
-    memory::Address,
 };
 use region::{alloc, protect, Allocation, Protection};
 
@@ -84,12 +83,19 @@ impl OpCodeStream {
         }
     }
 
-    pub fn add_marker(&mut self) -> Marker {
+    pub fn add_undefined_instruction(&mut self) -> Marker {
         let index = self.index;
         self.push_opcode(Udf::new().generate());
         Marker {
             index: index as i64,
             size: 4,
+        }
+    }
+
+    pub fn get_current_marker(&mut self) -> Marker {
+        Marker {
+            index: self.index as i64,
+            size: 0,
         }
     }
 
@@ -143,11 +149,17 @@ pub struct ExecutableBlock {
 }
 
 impl ExecutableBlock {
+    /// TODO(javier-varez): Remove this method
+    ///
     /// # Safety
     /// The user must guarantee that the region contains valid code at this point
     pub unsafe fn run<U, T: FnMut(*const ()) -> U>(&self, mut callable: T) -> U {
         let ptr: *const () = self.allocation.as_ptr();
         callable(ptr)
+    }
+
+    pub fn entrypoint(&self) -> *const () {
+        self.allocation.as_ptr()
     }
 
     pub fn clear_code(mut self) -> Block {
@@ -178,27 +190,6 @@ impl Block {
 
     pub fn into_stream(self) -> OpCodeStream {
         OpCodeStream::new(self.allocation)
-    }
-}
-
-pub struct LocationRange {
-    base_address: Address,
-    size: usize,
-}
-
-impl LocationRange {
-    /// Creates a new location range from the start and end addresses
-    pub fn new(start_addr: Address, end_addr: Address) -> Self {
-        assert!(end_addr > start_addr);
-        Self {
-            base_address: start_addr,
-            size: (end_addr - start_addr) as usize,
-        }
-    }
-
-    /// Checks if the address is part of this location range
-    pub fn contains(&self, address: Address) -> bool {
-        (self.base_address <= address) && ((self.base_address + self.size as u16) > address)
     }
 }
 
@@ -581,7 +572,7 @@ mod test {
                 .generate(),
         );
 
-        let source_marker = opcode_stream.add_marker();
+        let source_marker = opcode_stream.add_undefined_instruction();
         opcode_stream.push_opcode(
             Movz::new(Register::X0)
                 .with_immediate(Immediate::new(0xAA55))
@@ -627,7 +618,7 @@ mod test {
                 .update_flags()
                 .generate(),
         );
-        let branch_forward_marker = opcode_stream.add_marker();
+        let branch_forward_marker = opcode_stream.add_undefined_instruction();
 
         opcode_stream.push_opcode(
             Add::new(Register::X0, Register::X0)
@@ -640,7 +631,7 @@ mod test {
                 .update_flags()
                 .generate(),
         );
-        let branch_back_marker = opcode_stream.add_marker();
+        let branch_back_marker = opcode_stream.add_undefined_instruction();
         let offset = opcode_stream.relative_distance(&branch_forward_marker, &branch_back_marker);
         opcode_stream.patch_opcode(
             &branch_back_marker,
@@ -1115,7 +1106,7 @@ mod test {
         let value: u32 = 432;
         let value_ptr = &value as *const u32;
 
-        let ldr_lit_marker = opcode_stream.add_marker();
+        let ldr_lit_marker = opcode_stream.add_undefined_instruction();
         opcode_stream.push_opcode(Ret::new().generate());
 
         let ptr_marker = opcode_stream.push_pointer(value_ptr);

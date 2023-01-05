@@ -1,10 +1,10 @@
-use std::marker::PhantomData;
-
 use crate::arm_asm;
-use crate::block::{Block, ExecutableBlock, LocationRange, Marker, OpCodeStream};
-use crate::memory::{Address, MemoryInterface};
+use crate::block::{Block, Marker, OpCodeStream};
+use crate::compiled_block::{CompiledBlock, LocationRange};
+use crate::memory::{MemoryInterface, TargetAddress, VirtualAddress};
 use crate::mos6502;
 use crate::virtual_machine::ExitReason;
+use std::collections::HashMap;
 
 #[derive(Debug)]
 pub enum Error {
@@ -22,7 +22,7 @@ pub struct Compiler<'a, T: MemoryInterface> {
     memory_interface: &'a mut T,
     trampolines: Trampolines,
     opcode_stream: OpCodeStream,
-    _pd: PhantomData<T>,
+    instr_map: HashMap<u16, VirtualAddress>,
 }
 
 // These are callee-saved registers, which simplifies our life significantly when calling
@@ -70,15 +70,12 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
             memory_interface,
             trampolines,
             opcode_stream,
-            _pd: PhantomData {},
+            instr_map: HashMap::new(),
         }
     }
 
     /// Translates the given mos6502 machine code into native arm64 machine code.
-    pub fn translate_code(
-        mut self,
-        start_address: Address,
-    ) -> Result<(LocationRange, ExecutableBlock), Error> {
+    pub fn translate_code(mut self, start_address: TargetAddress) -> Result<CompiledBlock, Error> {
         let mut address = start_address;
         let mut current_instr_address = start_address;
         let mut should_continue = true;
@@ -94,10 +91,20 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
                 instr_or_error,
                 Err(mos6502::Error::JamOpCode(TEST_END_OPCODE))
             ) {
+                let marker = self.opcode_stream.get_current_marker();
+                self.instr_map.insert(
+                    current_instr_address,
+                    self.opcode_stream.marker_address(&marker),
+                );
                 self.emit_vm_exit(ExitReason::TestEnd);
                 should_continue = false;
             } else if let Some(instr) = instr_or_error? {
                 println!("Decoded instr {:?}", instr);
+                let marker = self.opcode_stream.get_current_marker();
+                self.instr_map.insert(
+                    current_instr_address,
+                    self.opcode_stream.marker_address(&marker),
+                );
                 self.emit_instruction_address_mode(&instr);
                 self.emit_instruction(&instr);
                 if !instr.opcode.base_instruction().is_branching_op() {
@@ -111,33 +118,27 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
             address = address.wrapping_add(1);
         }
 
-        Ok((
-            LocationRange::new(start_address, address),
+        Ok(CompiledBlock::new(
             self.opcode_stream.into_executable_code(),
+            LocationRange::new(start_address, address),
+            self.instr_map,
         ))
     }
 
     fn should_continue(&self, instruction: &mos6502::Instruction) -> bool {
         use mos6502::instructions::BaseInstruction;
         match instruction.opcode.base_instruction() {
-            // TODO(javier-varez): Handle other instructions that can cause an exit
             BaseInstruction::Jsr
             | BaseInstruction::Jmp
-            | BaseInstruction::Bcc
-            | BaseInstruction::Bcs
-            | BaseInstruction::Beq
-            | BaseInstruction::Bne
-            | BaseInstruction::Bmi
-            | BaseInstruction::Bpl
-            | BaseInstruction::Bvs
-            | BaseInstruction::Bvc
+            | BaseInstruction::Brk
+            | BaseInstruction::Rti
             | BaseInstruction::Rts => false,
             _ => true,
         }
     }
 
     fn emit_trampolines(opcode_stream: &mut OpCodeStream) -> Trampolines {
-        let forward_jump_marker = opcode_stream.add_marker();
+        let forward_jump_marker = opcode_stream.add_undefined_instruction();
 
         let read_8_bit_func: *const () = <T as MemoryInterface>::read_8_bits as *const _;
         let read_16_bit_func: *const () = <T as MemoryInterface>::read_16_bits as *const _;
@@ -223,7 +224,7 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
     fn emit_function_call(&mut self, target: Trampoline) {
         self.emit_context_save();
         // Load address of the target trampoline
-        let current_location = self.opcode_stream.add_marker();
+        let current_location = self.opcode_stream.add_undefined_instruction();
         let target_relative_distance = self
             .opcode_stream
             .relative_distance(&target, &current_location);
@@ -881,7 +882,7 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
         self.opcode_stream
             .push_opcode(arm_asm::SetF8::new(SCRATCH_REGISTER_2).generate());
 
-        let branch_to_bit6_marker = self.opcode_stream.add_marker();
+        let branch_to_bit6_marker = self.opcode_stream.add_undefined_instruction();
 
         self.opcode_stream.push_opcode(
             arm_asm::Or::new(SCRATCH_REGISTER, SCRATCH_REGISTER)
@@ -910,7 +911,7 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
                 .generate(),
         );
 
-        let branch_to_zero_marker = self.opcode_stream.add_marker();
+        let branch_to_zero_marker = self.opcode_stream.add_undefined_instruction();
 
         self.opcode_stream.push_opcode(
             arm_asm::Or::new(SCRATCH_REGISTER, SCRATCH_REGISTER)
@@ -939,7 +940,7 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
                 .generate(),
         );
 
-        let branch_to_set_nzcv = self.opcode_stream.add_marker();
+        let branch_to_set_nzcv = self.opcode_stream.add_undefined_instruction();
 
         self.opcode_stream.push_opcode(
             arm_asm::Or::new(SCRATCH_REGISTER, SCRATCH_REGISTER)

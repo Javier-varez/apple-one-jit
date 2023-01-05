@@ -1,7 +1,9 @@
+use crate::compiled_block::CompiledBlock;
 use crate::{
-    block::{Block, ExecutableBlock, LocationRange},
+    block::{Block },
+    compiled_block,
     dynamic_compiler::{self, Compiler},
-    memory::{Address, MemoryInterface},
+    memory::{MemoryInterface, TargetAddress},
 };
 
 core::arch::global_asm!(include_str!("virtual_machine.S"));
@@ -26,6 +28,7 @@ pub struct VmState {
 pub enum Error {
     TranslationError(dynamic_compiler::Error),
     BlockError(region::Error),
+    CompiledBlockError(compiled_block::Error),
 }
 
 impl From<region::Error> for Error {
@@ -36,6 +39,12 @@ impl From<region::Error> for Error {
 impl From<crate::dynamic_compiler::Error> for Error {
     fn from(error: crate::dynamic_compiler::Error) -> Self {
         Self::TranslationError(error)
+    }
+}
+
+impl From<crate::compiled_block::Error> for Error {
+    fn from(error: crate::compiled_block::Error) -> Self {
+        Self::CompiledBlockError(error)
     }
 }
 
@@ -50,7 +59,7 @@ pub enum ExitReason {
 
 pub struct VirtualMachine<'a, T: MemoryInterface> {
     memory_interface: &'a mut T,
-    blocks: Vec<(LocationRange, ExecutableBlock)>,
+    blocks: Vec<CompiledBlock>,
     state: VmState,
 }
 
@@ -65,21 +74,19 @@ impl<'a, T: MemoryInterface> VirtualMachine<'a, T> {
 
     /// Runs the dynamically-reassembled code, protecting temporarily the inner page as RX.
     pub fn run(&mut self) -> Result<ExitReason, Error> {
-        let block_idx = self.ensure_block_for_address(self.state.pc as Address)?;
-        let (_, block) = &mut self.blocks[block_idx];
+        let block_idx = self.ensure_block_for_address(self.state.pc as TargetAddress)?;
+        let block = &mut self.blocks[block_idx];
         let memory_iface_ptr: *mut () = self.memory_interface as *mut _ as *mut _;
-        Ok(unsafe {
-            block
-                .run(|ptr| jump_to_emulator(ptr, &mut self.state as *mut VmState, memory_iface_ptr))
-        })
+        let address = block.translate_address(self.state.pc as TargetAddress)?;
+        Ok(unsafe { jump_to_emulator(address, &mut self.state as *mut VmState, memory_iface_ptr) })
     }
 
-    fn ensure_block_for_address(&mut self, address: Address) -> Result<usize, Error> {
+    fn ensure_block_for_address(&mut self, address: TargetAddress) -> Result<usize, Error> {
         if let Some(idx) = self
             .blocks
             .iter()
             .enumerate()
-            .find(|(_idx, (location, _))| location.contains(address))
+            .find(|(_idx, block)| block.matches_address(address))
             .map(|(idx, _)| idx)
         {
             return Ok(idx);
@@ -87,8 +94,8 @@ impl<'a, T: MemoryInterface> VirtualMachine<'a, T> {
 
         let block = Block::allocate(region::page::size())?;
         let compiler = Compiler::new(block, self.memory_interface);
-        let (location, block) = compiler.translate_code(address)?;
-        self.blocks.push((location, block));
+        let block = compiler.translate_code(address)?;
+        self.blocks.push(block);
         Ok(self.blocks.len() - 1)
     }
 
@@ -118,13 +125,13 @@ mod test {
     }
 
     impl MemoryInterface for Memory {
-        extern "C" fn read_8_bits(&self, addr: Address) -> u8 {
+        extern "C" fn read_8_bits(&self, addr: TargetAddress) -> u8 {
             self.memory[addr as usize]
         }
-        extern "C" fn read_16_bits(&self, addr: Address) -> u16 {
+        extern "C" fn read_16_bits(&self, addr: TargetAddress) -> u16 {
             (self.memory[addr as usize] as u16) | ((self.memory[addr as usize] as u16) << 8)
         }
-        extern "C" fn write_8_bits(&mut self, addr: Address, data: u8) {
+        extern "C" fn write_8_bits(&mut self, addr: TargetAddress, data: u8) {
             self.memory[addr as usize] = data;
         }
     }
