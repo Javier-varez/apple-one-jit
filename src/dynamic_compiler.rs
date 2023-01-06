@@ -77,6 +77,7 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
 
     /// Translates the given mos6502 machine code into native arm64 machine code.
     pub fn translate_code(mut self, start_address: TargetAddress) -> Result<CompiledBlock, Error> {
+        log::info!("Translating code starting at : 0x{:x}", start_address);
         let mut address = start_address;
         let mut current_instr_address = start_address;
         let mut should_continue = true;
@@ -92,6 +93,7 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
                 instr_or_error,
                 Err(mos6502::Error::JamOpCode(TEST_END_OPCODE))
             ) {
+                log::info!("End of test");
                 let marker = self.opcode_stream.get_current_marker();
                 self.instr_map.insert(
                     current_instr_address,
@@ -100,6 +102,7 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
                 self.emit_vm_exit(ExitReason::TestEnd);
                 should_continue = false;
             } else if let Some(instr) = instr_or_error? {
+                log::info!("Decoded instr {:?} at 0x{:x}", instr, current_instr_address);
                 let marker = self.opcode_stream.get_current_marker();
                 self.instr_map.insert(
                     current_instr_address,

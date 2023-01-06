@@ -3,3 +3,4 @@
 *.profraw
 coverage_report
 /woz_monitor/build
+logfile.txt

@@ -67,12 +67,11 @@ impl Display {
     pub fn update(&mut self) {
         print!("\x1b[2J"); // Clear screen
         print!("\x1b[1;1H"); // Move cursor to beggining
-        for (idx, line) in self.chars.iter().enumerate() {
+        for line in self.chars {
             for val in line {
                 print!("{}", val);
             }
             print!("\n");
-            // print!("\x1b[{};1H", idx + 1);
         }
         print!("\x1b[{};{}H", self.cursor.line + 1, self.cursor.column + 1); // move cursor
         std::io::stdout().flush().unwrap();
