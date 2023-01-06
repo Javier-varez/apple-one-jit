@@ -100,7 +100,6 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
                 self.emit_vm_exit(ExitReason::TestEnd);
                 should_continue = false;
             } else if let Some(instr) = instr_or_error? {
-                println!("Decoded instr {:?}", instr);
                 let marker = self.opcode_stream.get_current_marker();
                 self.instr_map.insert(
                     current_instr_address,
@@ -1907,8 +1906,12 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
             // Interrupt functionality
             mos6502::instructions::BaseInstruction::Brk => todo!(),
             mos6502::instructions::BaseInstruction::Rti => todo!(),
-            mos6502::instructions::BaseInstruction::Cli => todo!(),
-            mos6502::instructions::BaseInstruction::Sei => todo!(),
+            mos6502::instructions::BaseInstruction::Cli => {
+                println!("Interrupts are not supported");
+            }
+            mos6502::instructions::BaseInstruction::Sei => {
+                println!("Interrupts are not supported");
+            }
         }
     }
 }
