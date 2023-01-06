@@ -24,6 +24,11 @@ fn build_6502_program(folder: &std::path::Path) -> std::path::PathBuf {
         .unwrap()
 }
 
+fn build_woz_monitor() {
+    let sh = Shell::new().unwrap();
+    cmd!(sh, "make -C woz_monitor").run().unwrap();
+}
+
 fn main() {
     let out_dir = std::env::var("OUT_DIR").unwrap();
     let test_file = std::path::Path::new(&out_dir).join("generated_tests.rs");
@@ -35,6 +40,9 @@ fn main() {
 
     println!("cargo:rerun-if-changed=tests/data");
     println!("cargo:rerun-if-changed=tests/test.ld");
+    println!("cargo:rerun-if-changed=woz_monitor");
+
+    build_woz_monitor();
 
     for folder in folders {
         let program_file = build_6502_program(&folder);
