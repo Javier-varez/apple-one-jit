@@ -1,6 +1,6 @@
 use crate::compiled_block::CompiledBlock;
 use crate::{
-    block::{Block },
+    block::Block,
     compiled_block,
     dynamic_compiler::{self, Compiler},
     memory::{MemoryInterface, TargetAddress},
@@ -57,6 +57,13 @@ pub enum ExitReason {
     TestEnd = 3,
 }
 
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum SystemVector {
+    Nmi = 0xFFFA,
+    Reset = 0xFFFC,
+    Irq = 0xFFFE,
+}
+
 pub struct VirtualMachine<'a, T: MemoryInterface> {
     memory_interface: &'a mut T,
     blocks: Vec<CompiledBlock>,
@@ -70,6 +77,16 @@ impl<'a, T: MemoryInterface> VirtualMachine<'a, T> {
             blocks: vec![],
             state: VmState::default(),
         }
+    }
+
+    fn read_system_vector(&self, vector: SystemVector) -> TargetAddress {
+        let lb = self.memory_interface.read_8_bits(vector as u16);
+        let hb = self.memory_interface.read_8_bits((vector as u16) + 1);
+        ((hb as TargetAddress) << 8) | (lb as TargetAddress)
+    }
+
+    pub fn reset(&mut self) {
+        self.state.pc = self.read_system_vector(SystemVector::Reset) as u64;
     }
 
     /// Runs the dynamically-reassembled code, protecting temporarily the inner page as RX.
@@ -127,9 +144,6 @@ mod test {
     impl MemoryInterface for Memory {
         extern "C" fn read_8_bits(&self, addr: TargetAddress) -> u8 {
             self.memory[addr as usize]
-        }
-        extern "C" fn read_16_bits(&self, addr: TargetAddress) -> u16 {
-            (self.memory[addr as usize] as u16) | ((self.memory[addr as usize] as u16) << 8)
         }
         extern "C" fn write_8_bits(&mut self, addr: TargetAddress, data: u8) {
             self.memory[addr as usize] = data;
