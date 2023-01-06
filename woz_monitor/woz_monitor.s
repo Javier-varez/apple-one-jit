@@ -105,12 +105,12 @@ BLSKIP:         INY                     // Advance text index
 NEXTITEM:       LDA     IN,y            // Get character
                 CMP     #CR
                 BEQ     GETLINE         // We're done if it's CR!
-                CMP     #$2E            // 0x2E = .
+                CMP     #$AE            // 0x2E = .
                 BCC     BLSKIP          // Ignore everything below .
                 BEQ     SETMODE         // Set BLOCK XAM mode (. = $AE)
-                CMP     #$3A            // 0x3A = :
+                CMP     #$BA            // 0x3A = :
                 BEQ     SETSTOR         // Set STOR mode! $BA will become $7B
-                CMP     #$52            // 0x52 = R
+                CMP     #$D2            // 0x52 = R
                 BEQ     RUN             // Run the program! Forget the rest
                 STX     L               // Clear input value (X=0)
                 STX     H
