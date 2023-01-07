@@ -28,9 +28,15 @@ impl Keyboard {
 
         let (sender, receiver) = std::sync::mpsc::channel();
         std::thread::spawn(move || loop {
+            const BACKSPACE_INPUT_CODE: u8 = 127;
+            const BACKSPACE_ASCII: u8 = 0x08;
             let mut buf = [0];
             stdin().read_exact(&mut buf).unwrap();
-            sender.send(buf[0]).unwrap();
+            let value = match buf[0] {
+                BACKSPACE_INPUT_CODE => BACKSPACE_ASCII,
+                value => value,
+            };
+            sender.send(value).unwrap();
         });
 
         Self { recv: receiver }

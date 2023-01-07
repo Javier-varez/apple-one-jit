@@ -50,6 +50,9 @@ impl Display {
     }
 
     pub fn push_char(&mut self, c: char) {
+        const NON_PRINTABLE_BOUNDARY_LOW: char = 0x20 as char;
+        const NON_PRINTABLE_BOUNDARY_HIGH: char = 0x80 as char;
+        const BACKSPACE: char = 0x08 as char;
         if c == '\r' {
             self.cursor.line += 1;
             self.cursor.column = 0;
@@ -57,8 +60,17 @@ impl Display {
                 self.cursor.line = LINES - 1;
                 self.shift_line();
             }
-        } else {
+        } else if c == BACKSPACE {
+            if self.cursor.column > 0 {
+                self.cursor.column -= 1;
+                self.chars[self.cursor.line][self.cursor.column] = ' ';
+            }
+        } else if c >= NON_PRINTABLE_BOUNDARY_LOW && c < NON_PRINTABLE_BOUNDARY_HIGH {
             self.chars[self.cursor.line][self.cursor.column] = c;
+            self.move_cursor();
+        } else {
+            // Non printable, just print a space
+            self.chars[self.cursor.line][self.cursor.column] = ' ';
             self.move_cursor();
         }
         self.update();
