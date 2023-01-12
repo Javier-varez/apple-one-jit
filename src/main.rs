@@ -8,7 +8,7 @@ use apple_one_jit::virtual_machine::VirtualMachine;
 use simplelog::WriteLogger;
 
 struct Memory {
-    ram: std::cell::RefCell<[u8; Self::RAM_SIZE as usize]>,
+    ram: [u8; Self::RAM_SIZE as usize],
     pia: std::cell::RefCell<Pia>,
 }
 
@@ -21,7 +21,7 @@ impl Memory {
 
     pub fn new() -> Self {
         Self {
-            ram: std::cell::RefCell::new([0; Self::RAM_SIZE as usize]),
+            ram: [0; Self::RAM_SIZE as usize],
             pia: std::cell::RefCell::new(Pia::new()),
         }
     }
@@ -41,7 +41,7 @@ impl Memory {
                 return;
             }
         };
-        log::info!(target: "MemoryAccess", "{} {:x}", txt, data);
+        log::debug!(target: "MemoryAccess", "{} {:x}", txt, data);
     }
 }
 
@@ -50,7 +50,7 @@ impl MemoryInterface for Memory {
         if addr >= Self::WOZ_MONITOR_OFFSET {
             Self::WOZ_MONITOR[(addr - Self::WOZ_MONITOR_OFFSET) as usize]
         } else if addr < Self::RAM_SIZE {
-            self.ram.borrow()[addr as usize]
+            self.ram[addr as usize]
         } else if (addr >= Self::PIA_OFFSET) && (addr < (Self::PIA_OFFSET + Pia::ADDR_SPACE)) {
             self.pia.borrow_mut().handle_read(addr - Self::PIA_OFFSET)
         } else {
@@ -61,7 +61,7 @@ impl MemoryInterface for Memory {
     extern "C" fn write_8_bits(&mut self, addr: apple_one_jit::memory::TargetAddress, data: u8) {
         if addr < Self::RAM_SIZE {
             self.log_write_access(addr, data);
-            self.ram.borrow_mut()[addr as usize] = data;
+            self.ram[addr as usize] = data;
         } else if (addr >= Self::PIA_OFFSET) && (addr < (Self::PIA_OFFSET + Pia::ADDR_SPACE)) {
             self.pia
                 .borrow_mut()

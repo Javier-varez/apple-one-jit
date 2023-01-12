@@ -1910,10 +1910,10 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
             mos6502::instructions::BaseInstruction::Brk => todo!(),
             mos6502::instructions::BaseInstruction::Rti => todo!(),
             mos6502::instructions::BaseInstruction::Cli => {
-                println!("Interrupts are not supported");
+                log::warn!("Attempted to emit `cli` but interrupts are not supported");
             }
             mos6502::instructions::BaseInstruction::Sei => {
-                println!("Interrupts are not supported");
+                log::warn!("Attempted to emit `sei` but interrupts are not supported");
             }
         }
     }
