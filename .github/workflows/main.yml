@@ -26,3 +26,34 @@ jobs:
       run: sudo apt update && sudo apt install -y gcc-aarch64-linux-gnu qemu-user-static
     - name: Cargo test
       run: "LLVM_MOS=$GITHUB_WORKSPACE/llvm-mos cargo test --target aarch64-unknown-linux-musl"
+
+  clippy-check:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: checkout
+      uses: actions/checkout@v2
+    - name: Setup rust toolchain
+      uses: actions-rs/toolchain@v1.0.6
+      with:
+        toolchain: stable
+        components: clippy
+    - uses: actions-rs/clippy-check@v1
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+  fmt-check:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: checkout
+      uses: actions/checkout@v2
+    - name: Setup rust toolchain
+      uses: actions-rs/toolchain@v1.0.6
+      with:
+        toolchain: stable
+        components: rustfmt
+    - uses: actions-rs/cargo@v1.0.1
+      with:
+        command: fmt
+        args: --check

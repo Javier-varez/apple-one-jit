@@ -30,6 +30,11 @@ fn build_woz_monitor() {
 }
 
 fn main() {
+    if std::env::var("LLVM_MOS").is_err() {
+        println!("cargo:warning=LLVM_MOS environment variable is not set, skipping test programs and woz monitor builds");
+        return;
+    }
+
     let out_dir = std::env::var("OUT_DIR").unwrap();
     let test_file = std::path::Path::new(&out_dir).join("generated_tests.rs");
     let mut f = std::fs::File::create(test_file).unwrap();
