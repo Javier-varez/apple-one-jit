@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use std::fs::File;
+use std::ops::Range;
 
 use apple_one_jit::memory::{MemoryInterface, TargetAddress};
 use apple_one_jit::pia::Pia;
@@ -17,6 +18,7 @@ impl Memory {
 
     const WOZ_MONITOR_OFFSET: TargetAddress = 0xFF00;
     const PIA_OFFSET: TargetAddress = 0xD010;
+    const PIA_RANGE: Range<TargetAddress> = Self::PIA_OFFSET..Self::PIA_OFFSET + Pia::ADDR_SPACE;
     const RAM_SIZE: TargetAddress = 4096;
 
     pub fn new() -> Self {
@@ -51,7 +53,7 @@ impl MemoryInterface for Memory {
             Self::WOZ_MONITOR[(addr - Self::WOZ_MONITOR_OFFSET) as usize]
         } else if addr < Self::RAM_SIZE {
             self.ram[addr as usize]
-        } else if (addr >= Self::PIA_OFFSET) && (addr < (Self::PIA_OFFSET + Pia::ADDR_SPACE)) {
+        } else if Self::PIA_RANGE.contains(&addr) {
             self.pia.borrow_mut().handle_read(addr - Self::PIA_OFFSET)
         } else {
             0
@@ -62,7 +64,7 @@ impl MemoryInterface for Memory {
         if addr < Self::RAM_SIZE {
             self.log_write_access(addr, data);
             self.ram[addr as usize] = data;
-        } else if (addr >= Self::PIA_OFFSET) && (addr < (Self::PIA_OFFSET + Pia::ADDR_SPACE)) {
+        } else if Self::PIA_RANGE.contains(&addr) {
             self.pia
                 .borrow_mut()
                 .handle_write(addr - Self::PIA_OFFSET, data);

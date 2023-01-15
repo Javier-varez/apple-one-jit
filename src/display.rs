@@ -3,6 +3,7 @@ use std::io::Write;
 const COLUMNS: usize = 80;
 const LINES: usize = 25;
 
+#[derive(Default)]
 struct Cursor {
     line: usize,
     column: usize,
@@ -13,20 +14,26 @@ pub struct Display {
     cursor: Cursor,
 }
 
-impl Display {
-    pub fn new() -> Self {
+impl Default for Display {
+    fn default() -> Self {
         print!("\x1b[2J");
         print!("\x1b[=3h");
         Self {
             chars: [[' '; COLUMNS]; LINES],
-            cursor: Cursor { line: 0, column: 0 },
+            cursor: Cursor::default(),
         }
+    }
+}
+
+impl Display {
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn shift_line(&mut self) {
         for i in 1..LINES {
             let (first, rest) = self.chars.split_at_mut(i);
-            *first.last_mut().unwrap() = rest[0].clone();
+            *first.last_mut().unwrap() = rest[0];
         }
         self.chars
             .last_mut()
@@ -83,7 +90,7 @@ impl Display {
             for val in line {
                 print!("{}", val);
             }
-            print!("\n");
+            println!();
         }
         print!("\x1b[{};{}H", self.cursor.line + 1, self.cursor.column + 1); // move cursor
         std::io::stdout().flush().unwrap();

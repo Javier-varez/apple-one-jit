@@ -1,6 +1,4 @@
-use crate::{
-    arm_asm::{OpCode, Udf},
-};
+use crate::arm_asm::{OpCode, Udf};
 use region::{alloc, protect, Allocation, Protection};
 
 #[derive(Clone)]
@@ -71,11 +69,11 @@ impl OpCodeStream {
 
         let index = self.index;
         self.get_mut_data()[index] = (label & 0xffffffff) as u32;
-        self.index = self.index + 1;
+        self.index += 1;
 
         let index = self.index;
         self.get_mut_data()[index] = (label >> 32) as u32;
-        self.index = self.index + 1;
+        self.index += 1;
 
         Marker {
             index: saved_index as i64,
@@ -114,8 +112,7 @@ impl OpCodeStream {
     pub fn to_file(&self, path: &std::path::Path) {
         let data: Vec<u8> = self.get_data()[..self.index]
             .iter()
-            .map(|value| value.to_le_bytes())
-            .flatten()
+            .flat_map(|value| value.to_le_bytes())
             .collect();
         std::fs::write(path, data).unwrap();
     }

@@ -1633,11 +1633,12 @@ impl Bfxil {
     }
 }
 
+#[derive(Default)]
 pub struct Nop();
 
 impl Nop {
     pub fn new() -> Self {
-        Self()
+        Nop::default()
     }
 
     pub fn generate(self) -> OpCode {

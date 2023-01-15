@@ -24,7 +24,7 @@ impl DisplayPort {
         let reg = match (addr, self.ddr_access()) {
             (0, false) => &mut self.data_dir_reg,
             (0, true) => {
-                byte = byte & 0x7f;
+                byte &= 0x7f;
                 self.display.push_char(byte as char);
                 &mut self.peripheral_reg
             }
@@ -48,6 +48,7 @@ impl DisplayPort {
     }
 }
 
+#[derive(Default)]
 struct KeyboardPort {
     keyboard: Keyboard,
     next_char: Option<char>,
@@ -59,13 +60,7 @@ struct KeyboardPort {
 impl KeyboardPort {
     const DDR_ACCESS_BIT: usize = 2;
     pub fn new() -> Self {
-        Self {
-            keyboard: Keyboard::new(),
-            next_char: None,
-            peripheral_reg: 0,
-            data_dir_reg: 0,
-            control_reg: 0,
-        }
+        Self::default()
     }
 
     pub fn handle_write(&mut self, addr: TargetAddress, byte: u8) {
@@ -83,7 +78,7 @@ impl KeyboardPort {
     }
 
     pub fn handle_read_control_reg(&mut self) -> u8 {
-        let has_data = if let Some(_) = self.next_char {
+        let has_data = if self.next_char.is_some() {
             true
         } else {
             self.next_char = self.keyboard.get_character();
@@ -119,16 +114,22 @@ pub struct Pia {
     port_b: DisplayPort,
 }
 
+impl Default for Pia {
+    fn default() -> Self {
+        Self {
+            port_a: KeyboardPort::new(),
+            port_b: DisplayPort::new(),
+        }
+    }
+}
+
 impl Pia {
     pub const ADDR_SPACE: u16 = 4;
     const ADDR_BIT: usize = 0;
     const PORT_BIT: usize = 1;
 
     pub fn new() -> Self {
-        Self {
-            port_a: KeyboardPort::new(),
-            port_b: DisplayPort::new(),
-        }
+        Self::default()
     }
 
     pub fn handle_write(&mut self, addr: TargetAddress, byte: u8) {

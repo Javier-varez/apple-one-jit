@@ -60,20 +60,20 @@ pub enum BaseInstruction {
 
 impl BaseInstruction {
     pub fn is_branching_op(&self) -> bool {
-        match self {
-            BaseInstruction::Bcc => true,
-            BaseInstruction::Bcs => true,
-            BaseInstruction::Beq => true,
-            BaseInstruction::Bne => true,
-            BaseInstruction::Bmi => true,
-            BaseInstruction::Bpl => true,
-            BaseInstruction::Bvc => true,
-            BaseInstruction::Bvs => true,
-            BaseInstruction::Jmp => true,
-            BaseInstruction::Jsr => true,
-            BaseInstruction::Rts => true,
-            BaseInstruction::Rti => true,
-            _ => false,
-        }
+        matches!(
+            self,
+            BaseInstruction::Bcc
+                | BaseInstruction::Bcs
+                | BaseInstruction::Beq
+                | BaseInstruction::Bne
+                | BaseInstruction::Bmi
+                | BaseInstruction::Bpl
+                | BaseInstruction::Bvc
+                | BaseInstruction::Bvs
+                | BaseInstruction::Jmp
+                | BaseInstruction::Jsr
+                | BaseInstruction::Rts
+                | BaseInstruction::Rti
+        )
     }
 }

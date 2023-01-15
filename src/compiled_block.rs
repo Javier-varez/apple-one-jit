@@ -58,7 +58,7 @@ impl CompiledBlock {
         self.translations
             .get(&addr)
             .ok_or(Error::InvalidAddress)
-            .map(|addr| addr.clone())
+            .copied()
     }
 
     pub fn entrypoint(&self) -> VirtualAddress {

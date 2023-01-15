@@ -32,16 +32,22 @@ pub struct InstrDecoder {
     state: State,
 }
 
-impl InstrDecoder {
-    pub fn new() -> Self {
+impl Default for InstrDecoder {
+    fn default() -> Self {
         Self {
             state: State::DecodeOpCode,
         }
     }
+}
+
+impl InstrDecoder {
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     pub fn feed(&mut self, byte: u8) -> Result<Option<Instruction>, Error> {
         const JAM_OP_CODE: u8 = 0x02;
-        match self.state.clone() {
+        match self.state {
             State::DecodeOpCode => {
                 if let Some(opcode) = opcode::translate(byte) {
                     if opcode.addressing_mode().operand_size() == 0 {

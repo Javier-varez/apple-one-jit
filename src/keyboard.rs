@@ -11,8 +11,8 @@ pub struct Keyboard {
     recv: std::sync::mpsc::Receiver<u8>,
 }
 
-impl Keyboard {
-    pub fn new() -> Self {
+impl Default for Keyboard {
+    fn default() -> Self {
         let mut termios: MaybeUninit<termios> = MaybeUninit::uninit();
         unsafe {
             tcgetattr(STDIN_FILENO, termios.as_mut_ptr());
@@ -41,10 +41,15 @@ impl Keyboard {
 
         Self { recv: receiver }
     }
+}
+
+impl Keyboard {
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     pub fn get_character(&mut self) -> Option<char> {
         let byte = self.recv.recv_timeout(std::time::Duration::from_nanos(0));
-        byte.ok()
-            .map(|c| if c == '\n' as u8 { '\r' } else { c as char })
+        byte.ok().map(|c| if c == b'\n' { '\r' } else { c as char })
     }
 }

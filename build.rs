@@ -32,7 +32,7 @@ fn build_woz_monitor() {
 fn main() {
     let out_dir = std::env::var("OUT_DIR").unwrap();
     let test_file = std::path::Path::new(&out_dir).join("generated_tests.rs");
-    let mut f = std::fs::File::create(&test_file).unwrap();
+    let mut f = std::fs::File::create(test_file).unwrap();
 
     let folders = std::fs::read_dir("tests/data")
         .unwrap()

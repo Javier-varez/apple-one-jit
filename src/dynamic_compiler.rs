@@ -130,14 +130,14 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
 
     fn should_continue(&self, instruction: &mos6502::Instruction) -> bool {
         use mos6502::instructions::BaseInstruction;
-        match instruction.opcode.base_instruction() {
+        !matches!(
+            instruction.opcode.base_instruction(),
             BaseInstruction::Jsr
-            | BaseInstruction::Jmp
-            | BaseInstruction::Brk
-            | BaseInstruction::Rti
-            | BaseInstruction::Rts => false,
-            _ => true,
-        }
+                | BaseInstruction::Jmp
+                | BaseInstruction::Brk
+                | BaseInstruction::Rti
+                | BaseInstruction::Rts
+        )
     }
 
     fn emit_trampolines(opcode_stream: &mut OpCodeStream) -> Trampolines {
@@ -568,11 +568,10 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
         instruction: &mos6502::Instruction,
         dest_register: arm_asm::Register,
     ) {
-        match instruction.opcode.addressing_mode().operand_type() {
-            mos6502::addressing_modes::OperandType::Memory => {
-                self.emit_8_byte_load(dest_register, DECODED_OP_REGISTER);
-            }
-            _ => {}
+        if instruction.opcode.addressing_mode().operand_type()
+            == mos6502::addressing_modes::OperandType::Memory
+        {
+            self.emit_8_byte_load(dest_register, DECODED_OP_REGISTER);
         }
     }
 
