@@ -1,8 +1,7 @@
-use std::mem::MaybeUninit;
-
-use nix::libc::termios;
 use nix::libc::STDIN_FILENO;
-use nix::libc::{tcgetattr, tcsetattr};
+use nix::sys::termios::InputFlags;
+use nix::sys::termios::LocalFlags;
+use nix::sys::termios::SetArg;
 
 use std::io::stdin;
 use std::io::Read;
@@ -13,18 +12,12 @@ pub struct Keyboard {
 
 impl Default for Keyboard {
     fn default() -> Self {
-        let mut termios: MaybeUninit<termios> = MaybeUninit::uninit();
-        unsafe {
-            tcgetattr(STDIN_FILENO, termios.as_mut_ptr());
-        }
+        let mut termios = nix::sys::termios::tcgetattr(STDIN_FILENO).unwrap();
+        termios.input_flags.set(InputFlags::ICRNL, true);
+        termios.local_flags.set(LocalFlags::ECHO, false);
+        termios.local_flags.set(LocalFlags::ICANON, false);
 
-        let mut termios = unsafe { termios.assume_init() };
-        termios.c_iflag |= nix::libc::ICRNL;
-        termios.c_lflag &= !(nix::libc::ECHO | nix::libc::ICANON);
-
-        unsafe {
-            tcsetattr(STDIN_FILENO, nix::libc::TCSAFLUSH, &termios);
-        }
+        nix::sys::termios::tcsetattr(STDIN_FILENO, SetArg::TCSAFLUSH, &termios).unwrap();
 
         let (sender, receiver) = std::sync::mpsc::channel();
         std::thread::spawn(move || loop {
