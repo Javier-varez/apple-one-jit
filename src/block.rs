@@ -1,5 +1,14 @@
 use crate::arm_asm::{OpCode, Udf};
-use region::{alloc, protect, Allocation, Protection};
+use nix::errno::Errno;
+use nix::sys::mman::{mmap, mprotect, MapFlags, ProtFlags};
+use nix::unistd::{sysconf, SysconfVar};
+use std::ffi::c_void;
+use std::num::NonZeroUsize;
+
+#[derive(Debug)]
+pub enum Error {
+    MmapError(Errno),
+}
 
 #[derive(Clone)]
 pub struct Marker {
@@ -13,6 +22,55 @@ impl Marker {
             index: self.index + (self.size / std::mem::size_of::<u32>()) as i64,
             size: 0,
         }
+    }
+}
+
+pub fn page_size() -> usize {
+    sysconf(SysconfVar::PAGE_SIZE)
+        .unwrap()
+        .unwrap()
+        .try_into()
+        .unwrap()
+}
+
+pub struct Allocation {
+    ptr: *mut c_void,
+    size: usize,
+}
+
+impl Allocation {
+    pub fn as_ptr<T>(&self) -> *const T {
+        self.ptr as *const _
+    }
+
+    pub fn as_mut_ptr<T>(&self) -> *mut T {
+        self.ptr as *mut _
+    }
+
+    pub fn size(&self) -> usize {
+        self.size
+    }
+
+    fn protect_exec(&mut self) {
+        unsafe {
+            mprotect(
+                self.ptr,
+                self.size,
+                ProtFlags::PROT_EXEC | ProtFlags::PROT_READ,
+            )
+            .unwrap()
+        };
+    }
+
+    fn protect_write(&mut self) {
+        unsafe {
+            mprotect(
+                self.ptr,
+                self.size,
+                ProtFlags::PROT_WRITE | ProtFlags::PROT_READ,
+            )
+            .unwrap()
+        };
     }
 }
 
@@ -31,14 +89,14 @@ impl OpCodeStream {
 
     fn get_data(&self) -> &[u32] {
         let ptr = self.allocation.as_ptr::<u32>();
-        let size = self.allocation.len() / std::mem::size_of::<u32>();
+        let size = self.allocation.size() / std::mem::size_of::<u32>();
         let slice = unsafe { std::slice::from_raw_parts(ptr, size) };
         slice
     }
 
     fn get_mut_data(&mut self) -> &mut [u32] {
         let ptr = self.allocation.as_mut_ptr::<u32>();
-        let size = self.allocation.len() / std::mem::size_of::<u32>();
+        let size = self.allocation.size() / std::mem::size_of::<u32>();
         let slice = unsafe { std::slice::from_raw_parts_mut(ptr, size) };
         slice
     }
@@ -118,14 +176,7 @@ impl OpCodeStream {
     }
 
     pub fn into_executable_code(mut self) -> ExecutableBlock {
-        unsafe {
-            protect(
-                self.allocation.as_mut_ptr::<()>(),
-                self.allocation.len(),
-                Protection::READ_EXECUTE,
-            )
-            .unwrap();
-        }
+        self.allocation.protect_exec();
 
         // Invalidate the instruction cache at this virtual address (for this page) because the
         // code in this page has changed
@@ -160,15 +211,7 @@ impl ExecutableBlock {
     }
 
     pub fn clear_code(mut self) -> Block {
-        unsafe {
-            protect(
-                self.allocation.as_mut_ptr::<()>(),
-                self.allocation.len(),
-                Protection::READ_WRITE,
-            )
-            .unwrap();
-        }
-
+        self.allocation.protect_write();
         Block {
             allocation: self.allocation,
         }
@@ -180,9 +223,21 @@ pub struct Block {
 }
 
 impl Block {
-    pub fn allocate(size: usize) -> Result<Self, region::Error> {
-        let allocation = alloc(size, Protection::READ_WRITE)?;
-        Ok(Self { allocation })
+    pub fn allocate(size: usize) -> Result<Self, Error> {
+        let ptr = unsafe {
+            mmap(
+                None,
+                NonZeroUsize::new(size).expect("Invalid size to allocate a block"),
+                ProtFlags::PROT_READ | ProtFlags::PROT_WRITE,
+                MapFlags::MAP_ANONYMOUS | MapFlags::MAP_PRIVATE,
+                -1,
+                0,
+            )
+        }
+        .map_err(|e| Error::MmapError(e))?;
+        Ok(Self {
+            allocation: Allocation { ptr, size },
+        })
     }
 
     pub fn into_stream(self) -> OpCodeStream {
@@ -198,7 +253,6 @@ mod test {
         MemoryAccessMode, Mov, MovShift, Movk, Movn, Movz, Mrs, Msr, Nop, OpSize, Or, RegShift,
         Register, Ret, Sbc, SetF8, SignedImmediate, Strd, Sub, Sxtb, Ubfx, Xor, NZCV,
     };
-    use region::page;
 
     macro_rules! invoke {
         ($jit:expr, $fn_type:ty $(, $args:expr)*) => {
@@ -211,7 +265,7 @@ mod test {
 
     #[test]
     fn test_add_immediate() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
         let mut opcode_stream = block.into_stream();
         opcode_stream.push_opcode(
             Add::new(Register::X0, Register::X0)
@@ -227,7 +281,7 @@ mod test {
 
     #[test]
     fn test_add_shifted_immediate() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
         let mut opcode_stream = block.into_stream();
 
         opcode_stream.push_opcode(
@@ -245,7 +299,7 @@ mod test {
 
     #[test]
     fn test_sub_immediate() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
 
         let mut opcode_stream = block.into_stream();
         opcode_stream.push_opcode(
@@ -262,7 +316,7 @@ mod test {
 
     #[test]
     fn test_sub_shifted_immediate() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
 
         let mut opcode_stream = block.into_stream();
         opcode_stream.push_opcode(
@@ -280,7 +334,7 @@ mod test {
 
     #[test]
     fn test_add_register_not_shifted() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
         let mut opcode_stream = block.into_stream();
 
         opcode_stream.push_opcode(
@@ -297,7 +351,7 @@ mod test {
 
     #[test]
     fn test_sub_register_not_shifted() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
         let mut opcode_stream = block.into_stream();
 
         opcode_stream.push_opcode(
@@ -314,7 +368,7 @@ mod test {
 
     #[test]
     fn test_add_register_shifted_left() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
 
         let mut opcode_stream = block.into_stream();
         opcode_stream.push_opcode(
@@ -332,7 +386,7 @@ mod test {
 
     #[test]
     fn test_sub_register_shifted_left() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
 
         let mut opcode_stream = block.into_stream();
         opcode_stream.push_opcode(
@@ -350,7 +404,7 @@ mod test {
 
     #[test]
     fn test_or_immediate() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
 
         let mut opcode_stream = block.into_stream();
         opcode_stream.push_opcode(
@@ -367,7 +421,7 @@ mod test {
 
     #[test]
     fn test_xor_immediate() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
 
         let mut opcode_stream = block.into_stream();
         opcode_stream.push_opcode(
@@ -384,7 +438,7 @@ mod test {
 
     #[test]
     fn test_and_immediate() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
         let mut opcode_stream = block.into_stream();
 
         opcode_stream.push_opcode(
@@ -401,7 +455,7 @@ mod test {
 
     #[test]
     fn test_or_register() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
         let mut opcode_stream = block.into_stream();
 
         opcode_stream.push_opcode(
@@ -426,7 +480,7 @@ mod test {
 
     #[test]
     fn test_and_register() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
         let mut opcode_stream = block.into_stream();
 
         opcode_stream.push_opcode(
@@ -451,7 +505,7 @@ mod test {
 
     #[test]
     fn test_xor_register() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
         let mut opcode_stream = block.into_stream();
 
         opcode_stream.push_opcode(
@@ -476,7 +530,7 @@ mod test {
 
     #[test]
     fn test_movz() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
         let mut opcode_stream = block.into_stream();
 
         opcode_stream.push_opcode(
@@ -493,7 +547,7 @@ mod test {
 
     #[test]
     fn test_movk() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
         let mut opcode_stream = block.into_stream();
 
         opcode_stream.push_opcode(
@@ -528,7 +582,7 @@ mod test {
 
     #[test]
     fn test_movn() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
         let mut opcode_stream = block.into_stream();
 
         opcode_stream.push_opcode(
@@ -546,7 +600,7 @@ mod test {
 
     #[test]
     fn test_mov_register() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
         let mut opcode_stream = block.into_stream();
 
         opcode_stream.push_opcode(Mov::new(Register::X0, Register::X1).generate());
@@ -559,7 +613,7 @@ mod test {
 
     #[test]
     fn test_branch() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
         let mut opcode_stream = block.into_stream();
 
         opcode_stream.push_opcode(
@@ -594,7 +648,7 @@ mod test {
 
     #[test]
     fn test_conditional_branch() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
         let mut opcode_stream = block.into_stream();
 
         opcode_stream.push_opcode(
@@ -658,7 +712,7 @@ mod test {
 
     #[test]
     fn test_str_instruction() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
         let mut opcode_stream = block.into_stream();
 
         // Store the value in X0 in [X1]
@@ -687,7 +741,7 @@ mod test {
 
     #[test]
     fn test_ldr_instruction() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
         let mut opcode_stream = block.into_stream();
 
         // Store the address in X0 in [X0]
@@ -712,7 +766,7 @@ mod test {
 
     #[test]
     fn test_str_with_imm_offset_instruction() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
         let mut opcode_stream = block.into_stream();
 
         // Store the value in X0 in [X1]
@@ -742,7 +796,7 @@ mod test {
 
     #[test]
     fn test_ldr_with_imm_offset_instruction() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
         let mut opcode_stream = block.into_stream();
 
         // Store the value in X0 in [X1]
@@ -769,7 +823,7 @@ mod test {
 
     #[test]
     fn test_ldr_with_register_offset_instr() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
         let mut opcode_stream = block.into_stream();
 
         // Store the value in X0 in [X1]
@@ -808,7 +862,7 @@ mod test {
 
     #[test]
     fn test_str_with_register_offset_instr() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
         let mut opcode_stream = block.into_stream();
 
         // Store the value in X0 in [X1]
@@ -850,7 +904,7 @@ mod test {
 
     #[test]
     fn test_sign_extend() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
         let mut opcode_stream = block.into_stream();
 
         // Sign extend byte on x0
@@ -866,7 +920,7 @@ mod test {
 
     #[test]
     fn test_set_get_flags() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
         let mut opcode_stream = block.into_stream();
 
         opcode_stream.push_opcode(Msr::new(NZCV, Register::X0).generate());
@@ -909,7 +963,7 @@ mod test {
 
     #[test]
     fn test_add_with_carry() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
         let mut opcode_stream = block.into_stream();
 
         opcode_stream.push_opcode(Msr::new(NZCV, Register::X2).generate());
@@ -958,7 +1012,7 @@ mod test {
 
     #[test]
     fn test_add_with_carry_32_bit() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
         let mut opcode_stream = block.into_stream();
 
         opcode_stream.push_opcode(Msr::new(NZCV, Register::X2).generate());
@@ -1011,7 +1065,7 @@ mod test {
 
     #[test]
     fn test_sub_with_borrow() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
         let mut opcode_stream = block.into_stream();
 
         opcode_stream.push_opcode(Msr::new(NZCV, Register::X2).generate());
@@ -1052,7 +1106,7 @@ mod test {
 
     #[test]
     fn test_sub_with_borrow_32_bit() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
         let mut opcode_stream = block.into_stream();
 
         opcode_stream.push_opcode(Msr::new(NZCV, Register::X2).generate());
@@ -1097,7 +1151,7 @@ mod test {
 
     #[test]
     fn test_load_literal() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
         let mut opcode_stream = block.into_stream();
 
         let value: u32 = 432;
@@ -1120,7 +1174,7 @@ mod test {
 
     #[test]
     fn test_branch_register() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
         let mut opcode_stream = block.into_stream();
 
         opcode_stream.push_opcode(
@@ -1164,7 +1218,7 @@ mod test {
 
     #[test]
     fn test_lsl() {
-        let mut block = Some(Block::allocate(page::size()).unwrap());
+        let mut block = Some(Block::allocate(page_size()).unwrap());
 
         for shift in 0..63 {
             let mut opcode_stream = block.take().unwrap().into_stream();
@@ -1182,7 +1236,7 @@ mod test {
 
     #[test]
     fn test_lsr() {
-        let mut block = Some(Block::allocate(page::size()).unwrap());
+        let mut block = Some(Block::allocate(page_size()).unwrap());
 
         for shift in 0..63 {
             let mut opcode_stream = block.take().unwrap().into_stream();
@@ -1200,7 +1254,7 @@ mod test {
 
     #[test]
     fn test_asr() {
-        let mut block = Some(Block::allocate(page::size()).unwrap());
+        let mut block = Some(Block::allocate(page_size()).unwrap());
 
         for shift in 0..63 {
             let mut opcode_stream = block.take().unwrap().into_stream();
@@ -1224,7 +1278,7 @@ mod test {
 
     #[test]
     fn test_nop() {
-        let block = Block::allocate(page::size()).unwrap();
+        let block = Block::allocate(page_size()).unwrap();
         let mut opcode_stream = block.into_stream();
 
         opcode_stream.push_opcode(Nop::new().generate());
@@ -1236,7 +1290,7 @@ mod test {
 
     #[test]
     fn test_ubfx() {
-        let mut block = Some(Block::allocate(page::size()).unwrap());
+        let mut block = Some(Block::allocate(page_size()).unwrap());
 
         for lsb in 0..58 {
             let mut opcode_stream = block.take().unwrap().into_stream();
@@ -1262,7 +1316,7 @@ mod test {
 
     #[test]
     fn test_bfi() {
-        let mut block = Some(Block::allocate(page::size()).unwrap());
+        let mut block = Some(Block::allocate(page_size()).unwrap());
 
         for lsb in 0..58 {
             let mut opcode_stream = block.take().unwrap().into_stream();
@@ -1295,7 +1349,7 @@ mod test {
 
     #[test]
     fn test_bfxil() {
-        let mut block = Some(Block::allocate(page::size()).unwrap());
+        let mut block = Some(Block::allocate(page_size()).unwrap());
 
         for lsb in 0..58 {
             let mut opcode_stream = block.take().unwrap().into_stream();

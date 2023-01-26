@@ -1,6 +1,6 @@
 use crate::compiled_block::CompiledBlock;
 use crate::{
-    block::Block,
+    block::{self, page_size, Block},
     compiled_block,
     dynamic_compiler::{self, Compiler},
     memory::{MemoryInterface, TargetAddress},
@@ -27,12 +27,12 @@ pub struct VmState {
 #[derive(Debug)]
 pub enum Error {
     TranslationError(dynamic_compiler::Error),
-    BlockError(region::Error),
+    BlockError(block::Error),
     CompiledBlockError(compiled_block::Error),
 }
 
-impl From<region::Error> for Error {
-    fn from(error: region::Error) -> Self {
+impl From<block::Error> for Error {
+    fn from(error: block::Error) -> Self {
         Self::BlockError(error)
     }
 }
@@ -109,7 +109,7 @@ impl<'a, T: MemoryInterface> VirtualMachine<'a, T> {
             return Ok(idx);
         }
 
-        let block = Block::allocate(region::page::size())?;
+        let block = Block::allocate(page_size())?;
         let compiler = Compiler::new(block, self.memory_interface);
         let block = compiler.translate_code(address)?;
         self.blocks.push(block);

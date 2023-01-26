@@ -1,8 +1,8 @@
 use std::mem::MaybeUninit;
 
-use libc::termios;
-use libc::STDIN_FILENO;
-use libc::{tcgetattr, tcsetattr};
+use nix::libc::termios;
+use nix::libc::STDIN_FILENO;
+use nix::libc::{tcgetattr, tcsetattr};
 
 use std::io::stdin;
 use std::io::Read;
@@ -19,11 +19,11 @@ impl Default for Keyboard {
         }
 
         let mut termios = unsafe { termios.assume_init() };
-        termios.c_iflag |= libc::ICRNL;
-        termios.c_lflag &= !(libc::ECHO | libc::ICANON);
+        termios.c_iflag |= nix::libc::ICRNL;
+        termios.c_lflag &= !(nix::libc::ECHO | nix::libc::ICANON);
 
         unsafe {
-            tcsetattr(STDIN_FILENO, libc::TCSAFLUSH, &termios);
+            tcsetattr(STDIN_FILENO, nix::libc::TCSAFLUSH, &termios);
         }
 
         let (sender, receiver) = std::sync::mpsc::channel();
