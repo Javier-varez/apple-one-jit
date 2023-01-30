@@ -141,7 +141,7 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
     }
 
     fn emit_trampolines(opcode_stream: &mut OpCodeStream) -> Trampolines {
-        let forward_jump_marker = opcode_stream.add_undefined_instruction();
+        let forward_jump_marker = opcode_stream.push_undefined_instruction();
 
         let read_8_bit_func: *const () = <T as MemoryInterface>::read_8_bits as *const _;
         let read_16_bit_func: *const () = <T as MemoryInterface>::read_16_bits as *const _;
@@ -239,7 +239,7 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
     fn emit_function_call(&mut self, target: Trampoline) {
         self.emit_context_save();
         // Load address of the target trampoline
-        let current_location = self.opcode_stream.add_undefined_instruction();
+        let current_location = self.opcode_stream.push_undefined_instruction();
         let target_relative_distance = self
             .opcode_stream
             .relative_distance(&target, &current_location);
@@ -923,7 +923,7 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
         self.opcode_stream
             .push_opcode(arm_asm::SetF8::new(SCRATCH_REGISTER_2).generate());
 
-        let branch_to_bit6_marker = self.opcode_stream.add_undefined_instruction();
+        let branch_to_bit6_marker = self.opcode_stream.push_undefined_instruction();
 
         self.opcode_stream.push_opcode(
             arm_asm::Or::new(SCRATCH_REGISTER, SCRATCH_REGISTER)
@@ -952,7 +952,7 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
                 .generate(),
         );
 
-        let branch_to_zero_marker = self.opcode_stream.add_undefined_instruction();
+        let branch_to_zero_marker = self.opcode_stream.push_undefined_instruction();
 
         self.opcode_stream.push_opcode(
             arm_asm::Or::new(SCRATCH_REGISTER, SCRATCH_REGISTER)
@@ -981,7 +981,7 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
                 .generate(),
         );
 
-        let branch_to_set_nzcv = self.opcode_stream.add_undefined_instruction();
+        let branch_to_set_nzcv = self.opcode_stream.push_undefined_instruction();
 
         self.opcode_stream.push_opcode(
             arm_asm::Or::new(SCRATCH_REGISTER, SCRATCH_REGISTER)

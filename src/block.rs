@@ -10,6 +10,7 @@ pub enum Error {
     MmapError(Errno),
 }
 
+/// A marker
 #[derive(Clone)]
 pub struct Marker {
     index: i64,
@@ -25,6 +26,7 @@ impl Marker {
     }
 }
 
+/// Obtains the system page size in bytes
 pub fn page_size() -> usize {
     sysconf(SysconfVar::PAGE_SIZE)
         .unwrap()
@@ -33,24 +35,29 @@ pub fn page_size() -> usize {
         .unwrap()
 }
 
+/// Represents a page-aligned dynamic allocation. May be used to store code and data
 pub struct Allocation {
     ptr: *mut c_void,
     size: usize,
 }
 
 impl Allocation {
+    /// Returns the base address of the allocation as a const pointer
     pub fn as_ptr<T>(&self) -> *const T {
         self.ptr as *const _
     }
 
+    /// Returns the base address of the allocation as a mut pointer
     pub fn as_mut_ptr<T>(&self) -> *mut T {
         self.ptr as *mut _
     }
 
+    /// Returns the size of the allocation in bytes
     pub fn size(&self) -> usize {
         self.size
     }
 
+    /// Changes the protection flags of the region of the allocation to read-exec
     fn protect_exec(&mut self) {
         unsafe {
             mprotect(
@@ -62,6 +69,7 @@ impl Allocation {
         };
     }
 
+    /// Changes the protection flags of the region of the allocation to read-write
     fn protect_write(&mut self) {
         unsafe {
             mprotect(
@@ -74,12 +82,15 @@ impl Allocation {
     }
 }
 
+/// Represents a stream of opcodes backed by an allocation
+/// may be used to populate an allocation with instructions and data.
 pub struct OpCodeStream {
     allocation: Allocation,
     index: usize,
 }
 
 impl OpCodeStream {
+    /// Constructs an opcode stream using the passed allocation
     pub fn new(allocation: Allocation) -> Self {
         Self {
             allocation,
@@ -87,20 +98,7 @@ impl OpCodeStream {
         }
     }
 
-    fn get_data(&self) -> &[u32] {
-        let ptr = self.allocation.as_ptr::<u32>();
-        let size = self.allocation.size() / std::mem::size_of::<u32>();
-        let slice = unsafe { std::slice::from_raw_parts(ptr, size) };
-        slice
-    }
-
-    fn get_mut_data(&mut self) -> &mut [u32] {
-        let ptr = self.allocation.as_mut_ptr::<u32>();
-        let size = self.allocation.size() / std::mem::size_of::<u32>();
-        let slice = unsafe { std::slice::from_raw_parts_mut(ptr, size) };
-        slice
-    }
-
+    /// Pushes a new opcode into the stream
     pub fn push_opcode(&mut self, opcode: OpCode) -> Marker {
         let index = self.index;
         let data = self.get_mut_data();
@@ -112,6 +110,7 @@ impl OpCodeStream {
         }
     }
 
+    /// Aligns the opcode stream to the given size.
     pub fn align(&mut self, size: usize) {
         let size = size / std::mem::size_of::<u32>();
         let rest = self.index % size;
@@ -120,6 +119,8 @@ impl OpCodeStream {
         }
     }
 
+    /// Pushes a pointer into the stream. It will implicitly align the index to 8 bytes. Returns a
+    /// marker with the location of the instruction.
     pub fn push_pointer<T>(&mut self, label: *const T) -> Marker {
         self.align(8);
         let saved_index = self.index;
@@ -139,15 +140,18 @@ impl OpCodeStream {
         }
     }
 
-    pub fn add_undefined_instruction(&mut self) -> Marker {
+    /// Pushes an undefined instruction. Returns a marker with the location of the instruction.
+    pub fn push_undefined_instruction(&mut self) -> Marker {
         let index = self.index;
         self.push_opcode(Udf::new().generate());
+
         Marker {
             index: index as i64,
             size: 4,
         }
     }
 
+    /// Gets a marker with the location of the next instruction that will be pushed
     pub fn get_current_marker(&mut self) -> Marker {
         Marker {
             index: self.index as i64,
@@ -155,18 +159,24 @@ impl OpCodeStream {
         }
     }
 
+    /// Obtains the relative distance between two markers as an i64 value.
+    /// This value represents the number of 4-byte instructions between the markers.
     pub fn relative_distance(&self, marker_a: &Marker, marker_b: &Marker) -> i64 {
         marker_a.index - marker_b.index
     }
 
+    /// Obtains the address of the given marker as a const pointer
     pub fn marker_address(&self, marker: &Marker) -> *const () {
         &self.get_data()[marker.index as usize] as *const _ as *const _
     }
 
+    /// Patches the opcode at the location given by the marker, replacing it.
     pub fn patch_opcode(&mut self, marker: &Marker, opcode: OpCode) {
         self.get_mut_data()[marker.index as usize] = opcode.value();
     }
 
+    /// Writes the binary code to a file at the given file, panicking if the file could not be
+    /// written
     pub fn to_file(&self, path: &std::path::Path) {
         let data: Vec<u8> = self.get_data()[..self.index]
             .iter()
@@ -175,6 +185,7 @@ impl OpCodeStream {
         std::fs::write(path, data).unwrap();
     }
 
+    /// Turns the stream into an ExecutableBlock which may be run
     pub fn into_executable_code(mut self) -> ExecutableBlock {
         self.allocation.protect_exec();
 
@@ -190,22 +201,28 @@ impl OpCodeStream {
             allocation: self.allocation,
         }
     }
+
+    fn get_data(&self) -> &[u32] {
+        let ptr = self.allocation.as_ptr::<u32>();
+        let size = self.allocation.size() / std::mem::size_of::<u32>();
+        let slice = unsafe { std::slice::from_raw_parts(ptr, size) };
+        slice
+    }
+
+    fn get_mut_data(&mut self) -> &mut [u32] {
+        let ptr = self.allocation.as_mut_ptr::<u32>();
+        let size = self.allocation.size() / std::mem::size_of::<u32>();
+        let slice = unsafe { std::slice::from_raw_parts_mut(ptr, size) };
+        slice
+    }
 }
 
+/// An executable block backed by an Allocation
 pub struct ExecutableBlock {
     allocation: Allocation,
 }
 
 impl ExecutableBlock {
-    /// TODO(javier-varez): Remove this method
-    ///
-    /// # Safety
-    /// The user must guarantee that the region contains valid code at this point
-    pub unsafe fn run<U, T: FnMut(*const ()) -> U>(&self, mut callable: T) -> U {
-        let ptr: *const () = self.allocation.as_ptr();
-        callable(ptr)
-    }
-
     pub fn entrypoint(&self) -> *const () {
         self.allocation.as_ptr()
     }
@@ -234,7 +251,7 @@ impl Block {
                 0,
             )
         }
-        .map_err(|e| Error::MmapError(e))?;
+        .map_err(Error::MmapError)?;
         Ok(Self {
             allocation: Allocation { ptr, size },
         })
@@ -256,10 +273,11 @@ mod test {
 
     macro_rules! invoke {
         ($jit:expr, $fn_type:ty $(, $args:expr)*) => {
-            $jit.run(|ptr: *const _| {
+            (|| {
+                let ptr = $jit.entrypoint();
                 let func: $fn_type = std::mem::transmute_copy(&ptr);
                 func($($args),*)
-            })
+            })()
         };
     }
 
@@ -623,7 +641,7 @@ mod test {
                 .generate(),
         );
 
-        let source_marker = opcode_stream.add_undefined_instruction();
+        let source_marker = opcode_stream.push_undefined_instruction();
         opcode_stream.push_opcode(
             Movz::new(Register::X0)
                 .with_immediate(Immediate::new(0xAA55))
@@ -669,7 +687,7 @@ mod test {
                 .update_flags()
                 .generate(),
         );
-        let branch_forward_marker = opcode_stream.add_undefined_instruction();
+        let branch_forward_marker = opcode_stream.push_undefined_instruction();
 
         opcode_stream.push_opcode(
             Add::new(Register::X0, Register::X0)
@@ -682,7 +700,7 @@ mod test {
                 .update_flags()
                 .generate(),
         );
-        let branch_back_marker = opcode_stream.add_undefined_instruction();
+        let branch_back_marker = opcode_stream.push_undefined_instruction();
         let offset = opcode_stream.relative_distance(&branch_forward_marker, &branch_back_marker);
         opcode_stream.patch_opcode(
             &branch_back_marker,
@@ -1157,7 +1175,7 @@ mod test {
         let value: u32 = 432;
         let value_ptr = &value as *const u32;
 
-        let ldr_lit_marker = opcode_stream.add_undefined_instruction();
+        let ldr_lit_marker = opcode_stream.push_undefined_instruction();
         opcode_stream.push_opcode(Ret::new().generate());
 
         let ptr_marker = opcode_stream.push_pointer(value_ptr);

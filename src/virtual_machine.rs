@@ -14,7 +14,7 @@ extern "C" {
 }
 
 #[repr(C)]
-#[derive(Default, PartialEq, Debug)]
+#[derive(Default, PartialEq, Eq, Debug)]
 pub struct VmState {
     pub a: u64,
     pub x: u64,
