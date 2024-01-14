@@ -326,8 +326,11 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
 
     fn emit_addr_mode_absolute(&mut self, instruction: &mos6502::Instruction) {
         let mos6502::addressing_modes::Operand::U16(value) = instruction.operand else {
-                    panic!("Unexpected operand type {:?} for AddressingMode::Absolute", instruction.operand);
-                };
+            panic!(
+                "Unexpected operand type {:?} for AddressingMode::Absolute",
+                instruction.operand
+            );
+        };
 
         self.opcode_stream.push_opcode(
             arm_asm::Movz::new(DECODED_OP_REGISTER)
@@ -342,8 +345,11 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
         index_reg: arm_asm::Register,
     ) {
         let mos6502::addressing_modes::Operand::U16(value) = instruction.operand else {
-                    panic!("Unexpected operand type {:?} for AddressingMode::AbsoluteIndexed", instruction.operand);
-                };
+            panic!(
+                "Unexpected operand type {:?} for AddressingMode::AbsoluteIndexed",
+                instruction.operand
+            );
+        };
 
         self.opcode_stream.push_opcode(
             arm_asm::Movz::new(SCRATCH_REGISTER)
@@ -359,11 +365,11 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
 
     fn emit_addr_mode_immediate(&mut self, instruction: &mos6502::Instruction) {
         let mos6502::addressing_modes::Operand::U8(value) = instruction.operand else {
-                    panic!(
-                        "Unexpected operand {:?} for AddressingMode::Immediate",
-                        instruction.operand
-                    )
-                };
+            panic!(
+                "Unexpected operand {:?} for AddressingMode::Immediate",
+                instruction.operand
+            )
+        };
 
         self.opcode_stream.push_opcode(
             arm_asm::Movz::new(DECODED_OP_REGISTER)
@@ -374,16 +380,22 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
 
     fn emit_addr_mode_indirect(&mut self, instruction: &mos6502::Instruction) {
         let mos6502::addressing_modes::Operand::U16(value) = instruction.operand else {
-                    panic!("Unexpected operand type {:?} for AddressingMode::Indirect", instruction.operand);
-                };
+            panic!(
+                "Unexpected operand type {:?} for AddressingMode::Indirect",
+                instruction.operand
+            );
+        };
 
         self.emit_16_byte_load_immediate_addr(DECODED_OP_REGISTER, value);
     }
 
     fn emit_addr_mode_x_indexed_indirect(&mut self, instruction: &mos6502::Instruction) {
         let mos6502::addressing_modes::Operand::U8(value) = instruction.operand else {
-                    panic!("Unexpected operand type {:?} for AddressingMode::XIndexedIndirect", instruction.operand);
-                };
+            panic!(
+                "Unexpected operand type {:?} for AddressingMode::XIndexedIndirect",
+                instruction.operand
+            );
+        };
 
         // (u8 operand + x reg) => addr in zero page => contains the address we want
         // building the address here is kinda painful because the 6502 wraps around on the
@@ -427,8 +439,11 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
 
     fn emit_addr_mode_indirect_y_indexed(&mut self, instruction: &mos6502::Instruction) {
         let mos6502::addressing_modes::Operand::U8(value) = instruction.operand else {
-                    panic!("Unexpected operand type {:?} for AddressingMode::IndirectYIndexed", instruction.operand);
-                };
+            panic!(
+                "Unexpected operand type {:?} for AddressingMode::IndirectYIndexed",
+                instruction.operand
+            );
+        };
 
         // (u8 operand) => addr in zero page + y reg => the address we want
         if value == u8::MAX {
@@ -453,8 +468,11 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
 
     fn emit_addr_mode_relative(&mut self, instruction: &mos6502::Instruction) {
         let mos6502::addressing_modes::Operand::U8(value) = instruction.operand else {
-                    panic!("Unexpected operand type {:?} for AddressingMode::Relative", instruction.operand);
-                };
+            panic!(
+                "Unexpected operand type {:?} for AddressingMode::Relative",
+                instruction.operand
+            );
+        };
 
         self.opcode_stream.push_opcode(
             arm_asm::Movz::new(DECODED_OP_REGISTER)
@@ -485,8 +503,11 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
 
     fn emit_addr_mode_zeropage(&mut self, instruction: &mos6502::Instruction) {
         let mos6502::addressing_modes::Operand::U8(value) = instruction.operand else {
-                    panic!("Unexpected operand type {:?} for AddressingMode::Zeropage", instruction.operand);
-                };
+            panic!(
+                "Unexpected operand type {:?} for AddressingMode::Zeropage",
+                instruction.operand
+            );
+        };
 
         self.opcode_stream.push_opcode(
             arm_asm::Movz::new(DECODED_OP_REGISTER)
@@ -501,8 +522,11 @@ impl<'a, T: MemoryInterface + 'a> Compiler<'a, T> {
         index_reg: arm_asm::Register,
     ) {
         let mos6502::addressing_modes::Operand::U8(value) = instruction.operand else {
-                    panic!("Unexpected operand type {:?} for AddressingMode::ZeropageIndexed", instruction.operand);
-                };
+            panic!(
+                "Unexpected operand type {:?} for AddressingMode::ZeropageIndexed",
+                instruction.operand
+            );
+        };
 
         self.opcode_stream.push_opcode(
             arm_asm::Add::new(DECODED_OP_REGISTER, index_reg)
