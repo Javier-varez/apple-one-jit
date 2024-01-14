@@ -9,21 +9,21 @@
 //  Memory declaration
 //-------------------------------------------------------------------------
 
-.equ XAML,            $24             // Last "opened" location Low
-.equ XAMH,            $25             // Last "opened" location High
-.equ STL,             $26             // Store address Low
-.equ STH,             $27             // Store address High
-.equ L,               $28             // Hex value parsing Low
-.equ H ,              $29             // Hex value parsing High
-.equ YSAV,            $2A             // Used to see if hex value is given
-.equ MODE,            $2B             // $00=XAM, $7F=STOR, $AE=BLOCK XAM
+.equ XAML,            0x24             // Last "opened" location Low
+.equ XAMH,            0x25             // Last "opened" location High
+.equ STL,             0x26             // Store address Low
+.equ STH,             0x27             // Store address High
+.equ L,               0x28             // Hex value parsing Low
+.equ H ,              0x29             // Hex value parsing High
+.equ YSAV,            0x2A             // Used to see if hex value is given
+.equ MODE,            0x2B             // $00=XAM, $7F=STOR, $AE=BLOCK XAM
 
-.equ IN,              $0200           // Input buffer 0x200 to 0x27F
+.equ IN,              0x0200           // Input buffer 0x200 to 0x27F
 
-.equ KBD,             $D010           // PIA.A keyboard input
-.equ KBDCR,           $D011           // PIA.A keyboard control register
-.equ DSP,             $D012           // PIA.B display output register
-.equ DSPCR,           $D013           // PIA.B display control register
+.equ KBD,             0xD010           // PIA.A keyboard input
+.equ KBDCR,           0xD011           // PIA.A keyboard control register
+.equ DSP,             0xD012           // PIA.B display output register
+.equ DSPCR,           0xD013           // PIA.B display control register
 
 // KBD b7..b0 are inputs, b6..b0 is ASCII input, b7 is constant high
 //     Programmed to respond to low to high KBD strobe
@@ -36,10 +36,10 @@
 //  Constants
 //-------------------------------------------------------------------------
 
-.equ BS,              $DF             // Backspace key, arrow left key
-.equ CR,              $8D             // Carriage Return
-.equ ESC,             $9B             // ESC key
-.equ PROMPT,          $5C             // Prompt character (\)
+.equ BS,              0xDF             // Backspace key, arrow left key
+.equ CR,              0x8D             // Carriage Return
+.equ ESC,             0x9B             // ESC key
+.equ PROMPT,          0x5C             // Prompt character (\)
 
 //-------------------------------------------------------------------------
 //  Let's get started
@@ -52,14 +52,14 @@
 .global RESET
 RESET:          CLD                     // Clear decimal arithmetic mode
                 CLI
-                LDY     #$7F            // Mask for DSP data direction reg
+                LDY     #0x7F            // Mask for DSP data direction reg
                 STY     DSP             //  (DDR mode is assumed after reset)
-                LDA     #$A7            // KBD and DSP control register mask
+                LDA     #0xA7            // KBD and DSP control register mask
                 STA     KBDCR           // Enable interrupts, set CA1, CB1 for
                 STA     DSPCR           //  positive edge sense/output mode.
 
 // Program falls through to the GETLINE routine to save some program bytes
-// Please note that Y still holds $7F, which will cause an automatic Escape
+// Please note that Y still holds 0x7F, which will cause an automatic Escape
 
 //-------------------------------------------------------------------------
 // The GETLINE process
@@ -96,7 +96,7 @@ NEXTCHAR:       LDA     KBDCR           // Wait for key press
                 LDA     #0              // Default mode is XAM
                 TAX                     // X=0
 
-SETSTOR:        ASL                     // Leaves $7B if setting STOR mode
+SETSTOR:        ASL                     // Leaves 0x7B if setting STOR mode
 
 SETMODE:        STA     MODE            // Set mode flags
 
@@ -105,12 +105,12 @@ BLSKIP:         INY                     // Advance text index
 NEXTITEM:       LDA     IN,y            // Get character
                 CMP     #CR
                 BEQ     GETLINE         // We're done if it's CR!
-                CMP     #$AE            // 0x2E = .
+                CMP     #0xAE            // 0x2E = .
                 BCC     BLSKIP          // Ignore everything below .
-                BEQ     SETMODE         // Set BLOCK XAM mode (. = $AE)
-                CMP     #$BA            // 0x3A = :
-                BEQ     SETSTOR         // Set STOR mode! $BA will become $7B
-                CMP     #$D2            // 0x52 = R
+                BEQ     SETMODE         // Set BLOCK XAM mode (. = 0xAE)
+                CMP     #0xBA            // 0x3A = :
+                BEQ     SETSTOR         // Set STOR mode! 0xBA will become $7B
+                CMP     #0xD2            // 0x52 = R
                 BEQ     RUN             // Run the program! Forget the rest
                 STX     L               // Clear input value (X=0)
                 STX     H
@@ -119,11 +119,11 @@ NEXTITEM:       LDA     IN,y            // Get character
 // Here we're trying to parse a new hex value
 
 NEXTHEX:        LDA     IN,y            // Get character for hex test
-                EOR     #$B0            // Map digits to 0-9
+                EOR     #0xB0            // Map digits to 0-9
                 CMP     #9+1            // Is it a decimal digit?
                 BCC     DIG             // Yes!
-                ADC     #$88            // Map letter A-F to $FA-FF
-                CMP     #$FA            // Hex letter?
+                ADC     #0x88            // Map letter A-F to $FA-FF
+                CMP     #0xFA            // Hex letter?
                 BCC     NOTHEX          // No! Character not hex
 
 DIG:            ASL
@@ -185,10 +185,10 @@ NXTPRNT:        BNE     PRDATA          // NE means no address to print
                 JSR     PRBYTE
                 LDA     XAML            // Output low-order byte of address
                 JSR     PRBYTE
-                LDA     #$3A            // 0x3A = :
+                LDA     #0x3A            // 0x3A = :
                 JSR     ECHO
 
-PRDATA:         LDA     #$20            // Print space
+PRDATA:         LDA     #0x20            // Print space
                 JSR     ECHO
                 LDA     (XAML,x)        // Get data from address (X=0)
                 JSR     PRBYTE          // Output it in hex format
@@ -204,7 +204,7 @@ XAMNEXT:        STX     MODE            // 0 -> MODE (XAM mode).
                 INC     XAMH
 
 MOD8CHK:        LDA     XAML            // If address MOD 8 = 0 start new line
-                AND     #$07
+                AND     #0x07
                 BPL     NXTPRNT         // Always taken.
 
 //-------------------------------------------------------------------------
@@ -225,9 +225,9 @@ PRBYTE:         PHA                     // Save A for LSD
 //  Subroutine to print a hexadecimal digit
 //-------------------------------------------------------------------------
 
-PRHEX:          AND     #$0F            // Mask LSD for hex print
-                ORA     #$30            // Add 0
-                CMP     #$3A            // Is it a decimal digit?
+PRHEX:          AND     #0x0F            // Mask LSD for hex print
+                ORA     #0x30            // Add 0
+                CMP     #0x3A            // Is it a decimal digit?
                 BCC     ECHO            // Yes! output it
                 ADC     #6              // Add offset for letter A-F
 
@@ -248,9 +248,9 @@ ECHO:           BIT     DSP             // DA bit (B7) cleared yet?
 
 .data
 
-                .2byte  $0000           // Unused, what a pity
-NMI_VEC:        .2byte  $0F00           // NMI vector
+                .2byte  0x0000           // Unused, what a pity
+NMI_VEC:        .2byte  0x0F00           // NMI vector
 RESET_VEC:      .2byte  RESET           // RESET vector
-IRQ_VEC:        .2byte  $0000           // IRQ vector
+IRQ_VEC:        .2byte  0x0000           // IRQ vector
 
 //-------------------------------------------------------------------------

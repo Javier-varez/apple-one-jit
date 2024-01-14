@@ -1,5 +1,5 @@
-.org $800
+.org 0x800
 
 main:
-   ora $f
-   .byte $02
+   ora 0xf
+   .byte 0x02

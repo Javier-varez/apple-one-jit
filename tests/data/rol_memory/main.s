@@ -1,5 +1,5 @@
-.org $800
+.org 0x800
 
 main:
-   rol $ff
-   .byte $02
+   rol 0xff
+   .byte 0x02

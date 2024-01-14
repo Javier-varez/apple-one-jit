@@ -1,10 +1,10 @@
-.org $800
+.org 0x800
 
 main:
-    lda #$10
-    ldx #$4
+    lda #0x10
+    ldx #0x4
 loop:
-    adc $20,x
+    adc 0x20,x
     dex
     bpl loop
-   .byte $02
+   .byte 0x02

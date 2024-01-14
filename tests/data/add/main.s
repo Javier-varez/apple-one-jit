@@ -1,6 +1,6 @@
-.org $800
+.org 0x800
 
 main:
-   lda #$1
-   adc #$7f
-   .byte $02
+   lda #0x1
+   adc #0x7f
+   .byte 0x02

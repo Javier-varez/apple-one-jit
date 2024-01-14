@@ -1,6 +1,6 @@
-.org $800
+.org 0x800
 
 main:
     // A = ((5) + y)
-    lda ($5),y
-    .byte $02
+    lda (0x5),y
+    .byte 0x02

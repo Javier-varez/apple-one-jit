@@ -14,7 +14,7 @@ struct Memory {
 }
 
 impl Memory {
-    const WOZ_MONITOR: &[u8; 256] = include_bytes!("../woz_monitor/build/woz_monitor.bin");
+    const WOZ_MONITOR: &'static [u8; 256] = include_bytes!("../woz_monitor/build/woz_monitor.bin");
 
     const WOZ_MONITOR_OFFSET: TargetAddress = 0xFF00;
     const PIA_OFFSET: TargetAddress = 0xD010;

@@ -1,5 +1,5 @@
-.org $800
+.org 0x800
 
 main:
-   cpx $00
-   .byte $02
+   cpx 0x00
+   .byte 0x02

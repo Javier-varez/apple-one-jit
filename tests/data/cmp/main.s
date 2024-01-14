@@ -1,5 +1,5 @@
-.org $800
+.org 0x800
 
 main:
-   cmp $00
-   .byte $02
+   cmp 0x00
+   .byte 0x02

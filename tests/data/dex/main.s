@@ -1,5 +1,5 @@
-.org $800
+.org 0x800
 
 main:
    dex
-   .byte $02
+   .byte 0x02

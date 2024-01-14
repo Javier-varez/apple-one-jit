@@ -1,4 +1,4 @@
-.org $800
+.org 0x800
 
 main:
    rts
@@ -7,6 +7,6 @@ main:
    brk
 
    // Addr 0x804
-   .byte $02
+   .byte 0x02
    brk
    brk

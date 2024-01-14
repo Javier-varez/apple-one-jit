@@ -1,5 +1,5 @@
-.org $800
+.org 0x800
 
 main:
-   eor $f
-   .byte $02
+   eor 0xf
+   .byte 0x02

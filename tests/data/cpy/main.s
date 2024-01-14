@@ -1,5 +1,5 @@
-.org $800
+.org 0x800
 
 main:
-   cpy $00
-   .byte $02
+   cpy 0x00
+   .byte 0x02

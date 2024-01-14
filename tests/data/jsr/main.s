@@ -1,4 +1,4 @@
-.org $800
+.org 0x800
 
 main:
    jsr test
@@ -6,4 +6,4 @@ main:
 
 test:
    // End test
-   .byte $02
+   .byte 0x02

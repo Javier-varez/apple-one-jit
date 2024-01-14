@@ -1,5 +1,5 @@
-.org $800
+.org 0x800
 
 main:
-   lsr $ff
-   .byte $02
+   lsr 0xff
+   .byte 0x02

@@ -1,6 +1,6 @@
-.org $800
+.org 0x800
 
 main:
     // Load memory addr 0
-    lda $1234
-    .byte $02
+    lda 0x1234
+    .byte 0x02

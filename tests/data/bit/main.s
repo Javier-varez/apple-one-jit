@@ -1,5 +1,5 @@
-.org $800
+.org 0x800
 
 main:
-   bit $10
-   .byte $02
+   bit 0x10
+   .byte 0x02

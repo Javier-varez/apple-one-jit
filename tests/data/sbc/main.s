@@ -1,5 +1,5 @@
-.org $800
+.org 0x800
 
 main:
-   sbc $00
-   .byte $02
+   sbc 0x00
+   .byte 0x02

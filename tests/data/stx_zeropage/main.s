@@ -1,5 +1,5 @@
-.org $800
+.org 0x800
 
 main:
-    stx $34
-    .byte $02
+    stx 0x34
+    .byte 0x02
